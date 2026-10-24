@@ -1,0 +1,68 @@
+M rowdiff
+
+T Row struct
+  id:str
+  hash:str
+
+T Input struct
+  before:[Row]
+  after:[Row]
+
+T Diff struct
+  added:[str]
+  removed:[str]
+  changed:[str]
+
+F main input:Input->result Diff str
+  E beforeRow input.before
+    L seen false
+    E otherBefore input.before
+      ? (= beforeRow.id otherBefore.id)
+        ? seen
+          R (err "duplicate id in before")
+        S seen true
+  E afterRow input.after
+    L seen false
+    E otherAfter input.after
+      ? (= afterRow.id otherAfter.id)
+        ? seen
+          R (err "duplicate id in after")
+        S seen true
+  L added (buf str (# input.after))
+  L removed (buf str (# input.before))
+  L changed (buf str (# input.after))
+  E afterRow input.after
+    L found false
+    E beforeRow input.before
+      ? (= afterRow.id beforeRow.id)
+        S found true
+        ? (!= afterRow.hash beforeRow.hash)
+          P changed afterRow.id
+    ? (! found)
+      P added afterRow.id
+  E beforeRow input.before
+    L found false
+    E afterRow input.after
+      ? (= beforeRow.id afterRow.id)
+        S found true
+    ? (! found)
+      P removed beforeRow.id
+  R (ok (Diff added=(finish added) removed=(finish removed) changed=(finish changed)))
+
+X unchanged_rows
+  A (= (main (Input before=[(Row id="a" hash="1")] after=[(Row id="a" hash="1")])) (ok (Diff added=[] removed=[] changed=[])))
+
+X added_id
+  A (= (main (Input before=[(Row id="a" hash="1")] after=[(Row id="a" hash="1") (Row id="b" hash="2")])) (ok (Diff added=["b"] removed=[] changed=[])))
+
+X removed_id
+  A (= (main (Input before=[(Row id="a" hash="1") (Row id="b" hash="2")] after=[(Row id="a" hash="1")])) (ok (Diff added=[] removed=["b"] changed=[])))
+
+X changed_id
+  A (= (main (Input before=[(Row id="a" hash="1")] after=[(Row id="a" hash="2")])) (ok (Diff added=[] removed=[] changed=["a"])))
+
+X duplicate_before_id
+  A (= (main (Input before=[(Row id="a" hash="1") (Row id="a" hash="2")] after=[])) (err "duplicate id in before"))
+
+X duplicate_after_id
+  A (= (main (Input before=[] after=[(Row id="a" hash="1") (Row id="a" hash="2")])) (err "duplicate id in after"))

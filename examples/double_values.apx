@@ -1,0 +1,13 @@
+M double_values
+
+F main values:[i64]->[i64]
+  L out (buf i64 (# values))
+  E value values
+    P out (* value 2)
+  R (finish out)
+
+X empty
+  A (= (main []) [])
+
+X signed_values
+  A (= (main [1 -2 0]) [2 -4 0])

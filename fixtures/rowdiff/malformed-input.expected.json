@@ -1,0 +1,7 @@
+{
+  "diagnostic": {
+    "code": "A101",
+    "kind": "missing_field"
+  },
+  "status": "error"
+}

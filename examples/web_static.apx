@@ -1,0 +1,85 @@
+M web_static
+
+T Header struct
+  name:str
+  value:str
+
+T Param struct
+  name:str
+  value:str
+
+T Request struct
+  method:str
+  path:str
+  headers:[Header]
+  query:[Param]
+
+T Response struct
+  status:i64
+  content_type:str
+  headers:[Header]
+  body:str
+  content_length:i64
+
+T StaticAsset struct
+  path:str
+  content_type:str
+  body:str
+
+F header_value headers:[Header] name:str->option str
+  E header headers
+    ? (= header.name name)
+      R (some header.value)
+  R (none)
+
+F request_id_header maybe_id:option str->Header
+  C maybe_id
+    some id
+      R (Header name="X-Request-Id" value=id)
+    none
+      R (Header name="X-Request-Id" value="none")
+
+F method_not_allowed_response incoming_headers:[Header]->Response
+  R (Response status=405 content_type="text/plain" headers=[(Header name="X-App" value="apodexis") (request_id_header (header_value incoming_headers "X-Request-Id")) (Header name="Allow" value="GET")] body="Method Not Allowed" content_length=(# "Method Not Allowed"))
+
+F not_found_response incoming_headers:[Header]->Response
+  R (Response status=404 content_type="text/plain" headers=[(Header name="X-App" value="apodexis") (request_id_header (header_value incoming_headers "X-Request-Id"))] body="Not Found" content_length=(# "Not Found"))
+
+F static_assets->[StaticAsset]
+  R [(StaticAsset path="/" content_type="text/html" body="<html><head><link rel=stylesheet href=/style.css></head><body><h1>Apodexis</h1><script src=/app.js></script></body></html>") (StaticAsset path="/style.css" content_type="text/css" body="h1{font-family:sans-serif}body{margin:2em}") (StaticAsset path="/app.js" content_type="application/javascript" body="console.log('apodexis loaded')")]
+
+F asset_for_path path:str->option StaticAsset
+  E asset (static_assets)
+    ? (= asset.path path)
+      R (some asset)
+  R (none)
+
+F main input:Request->result Response str
+  C (asset_for_path input.path)
+    some asset
+      ? (= input.method "GET")
+        R (ok (Response status=200 content_type=asset.content_type headers=[(Header name="X-App" value="apodexis") (request_id_header (header_value input.headers "X-Request-Id"))] body=asset.body content_length=(# asset.body)))
+      R (ok (method_not_allowed_response input.headers))
+    none
+      R (ok (not_found_response input.headers))
+
+X root_html
+  A (= (main (Request method="GET" path="/" headers=[] query=[])) (ok (Response status=200 content_type="text/html" headers=[(Header name="X-App" value="apodexis") (Header name="X-Request-Id" value="none")] body="<html><head><link rel=stylesheet href=/style.css></head><body><h1>Apodexis</h1><script src=/app.js></script></body></html>" content_length=122)))
+
+X css_asset
+  A (= (main (Request method="GET" path="/style.css" headers=[] query=[])) (ok (Response status=200 content_type="text/css" headers=[(Header name="X-App" value="apodexis") (Header name="X-Request-Id" value="none")] body="h1{font-family:sans-serif}body{margin:2em}" content_length=42)))
+
+X js_asset
+  A (= (main (Request method="GET" path="/app.js" headers=[] query=[])) (ok (Response status=200 content_type="application/javascript" headers=[(Header name="X-App" value="apodexis") (Header name="X-Request-Id" value="none")] body="console.log('apodexis loaded')" content_length=30)))
+
+X post_root_405
+  A (= (main (Request method="POST" path="/" headers=[] query=[])) (ok (Response status=405 content_type="text/plain" headers=[(Header name="X-App" value="apodexis") (Header name="X-Request-Id" value="none") (Header name="Allow" value="GET")] body="Method Not Allowed" content_length=18)))
+
+X missing_path_404
+  A (= (main (Request method="GET" path="/nope" headers=[] query=[])) (ok (Response status=404 content_type="text/plain" headers=[(Header name="X-App" value="apodexis") (Header name="X-Request-Id" value="none")] body="Not Found" content_length=9)))
+
+X asset_for_path_finds_root
+  A (= (asset_for_path "/") (some (StaticAsset path="/" content_type="text/html" body="<html><head><link rel=stylesheet href=/style.css></head><body><h1>Apodexis</h1><script src=/app.js></script></body></html>")))
+
+X asset_for_path_misses_unknown
+  A (= (asset_for_path "/nope") (none))

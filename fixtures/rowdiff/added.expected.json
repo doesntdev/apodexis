@@ -1,0 +1,13 @@
+{
+  "output": {
+    "tag": "ok",
+    "value": {
+      "added": [
+        "a"
+      ],
+      "changed": [],
+      "removed": []
+    }
+  },
+  "status": "ok"
+}

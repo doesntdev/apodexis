@@ -1,0 +1,3 @@
+# Normalize first-party text while preserving vendored upstream bytes.
+* text=auto eol=lf
+/third_party/qbe/** -text -whitespace

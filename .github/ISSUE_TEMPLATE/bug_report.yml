@@ -1,0 +1,46 @@
+name: Bug report
+description: Report a reproducible compiler, runtime, CLI or MCP defect.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use synthetic, sanitized source and input. Do not include credentials,
+        private data or environment dumps. For sensitive findings, follow the
+        [security policy](https://github.com/doesntdev/apodexis/security/policy)
+        instead of posting exploit details here.
+  - type: textarea
+    id: environment
+    attributes:
+      label: Revision and environment
+      description: Include the source revision or bundle identity, OS/architecture, capabilities output and relevant toolchain/client versions.
+      placeholder: Paste the revision and bin/apodexis capabilities output, then describe the environment.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Include complete minimal source, sanitized JSON input and the exact CLI command or MCP tool arguments. State any operator grants without exposing secrets.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: Describe the expected result and link to the relevant reference when possible.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      description: Paste actual diagnostics/output and process exit status. For MCP, include the structured result or protocol error. State how reliably it reproduces.
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Checks performed
+      description: List commands actually run and their outcomes, or state that no additional checks were run.
+    validations:
+      required: false

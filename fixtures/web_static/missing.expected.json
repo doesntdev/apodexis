@@ -1,0 +1,22 @@
+{
+  "output": {
+    "tag": "ok",
+    "value": {
+      "body": "Not Found",
+      "content_length": 9,
+      "content_type": "text/plain",
+      "headers": [
+        {
+          "name": "X-App",
+          "value": "apodexis"
+        },
+        {
+          "name": "X-Request-Id",
+          "value": "none"
+        }
+      ],
+      "status": 404
+    }
+  },
+  "status": "ok"
+}

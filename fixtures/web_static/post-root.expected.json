@@ -1,0 +1,26 @@
+{
+  "output": {
+    "tag": "ok",
+    "value": {
+      "body": "Method Not Allowed",
+      "content_length": 18,
+      "content_type": "text/plain",
+      "headers": [
+        {
+          "name": "X-App",
+          "value": "apodexis"
+        },
+        {
+          "name": "X-Request-Id",
+          "value": "none"
+        },
+        {
+          "name": "Allow",
+          "value": "GET"
+        }
+      ],
+      "status": 405
+    }
+  },
+  "status": "ok"
+}

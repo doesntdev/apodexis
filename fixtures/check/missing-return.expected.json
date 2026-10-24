@@ -1,0 +1,17 @@
+{
+  "status": "error",
+  "diagnostics": [
+    {
+      "code": "T105",
+      "kind": "missing_return",
+      "span": {
+        "start_byte": 9,
+        "end_byte": 13,
+        "start_line": 3,
+        "start_column": 3,
+        "end_line": 3,
+        "end_column": 7
+      }
+    }
+  ]
+}

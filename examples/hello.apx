@@ -1,0 +1,7 @@
+M hello
+
+F main->str
+  R "Hello, world!"
+
+X hello_output
+  A (= (main) "Hello, world!")

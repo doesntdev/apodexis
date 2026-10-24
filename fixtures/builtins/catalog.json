@@ -1,0 +1,205 @@
+[
+  {
+    "name": "add",
+    "head": "+",
+    "source": "M builtin_add\n\nF main->i64\n  R (+ 2 3)\n",
+    "input": null,
+    "expected": 5
+  },
+  {
+    "name": "subtract",
+    "head": "-",
+    "source": "M builtin_subtract\n\nF main->i64\n  R (- 5 2)\n",
+    "input": null,
+    "expected": 3
+  },
+  {
+    "name": "multiply",
+    "head": "*",
+    "source": "M builtin_multiply\n\nF main->i64\n  R (* 3 4)\n",
+    "input": null,
+    "expected": 12
+  },
+  {
+    "name": "divide",
+    "head": "/",
+    "source": "M builtin_divide\n\nF main->i64\n  R (/ 8 2)\n",
+    "input": null,
+    "expected": 4
+  },
+  {
+    "name": "remainder",
+    "head": "%",
+    "source": "M builtin_remainder\n\nF main->i64\n  R (% 7 4)\n",
+    "input": null,
+    "expected": 3
+  },
+  {
+    "name": "equal",
+    "head": "=",
+    "source": "M builtin_equal\n\nF main->bool\n  R (= 1 1)\n",
+    "input": null,
+    "expected": true
+  },
+  {
+    "name": "not_equal",
+    "head": "!=",
+    "source": "M builtin_not_equal\n\nF main->bool\n  R (!= 1 2)\n",
+    "input": null,
+    "expected": true
+  },
+  {
+    "name": "less_than",
+    "head": "<",
+    "source": "M builtin_less_than\n\nF main->bool\n  R (< 1 2)\n",
+    "input": null,
+    "expected": true
+  },
+  {
+    "name": "less_or_equal",
+    "head": "<=",
+    "source": "M builtin_less_or_equal\n\nF main->bool\n  R (<= 2 2)\n",
+    "input": null,
+    "expected": true
+  },
+  {
+    "name": "greater_than",
+    "head": ">",
+    "source": "M builtin_greater_than\n\nF main->bool\n  R (> 2 1)\n",
+    "input": null,
+    "expected": true
+  },
+  {
+    "name": "greater_or_equal",
+    "head": ">=",
+    "source": "M builtin_greater_or_equal\n\nF main->bool\n  R (>= 2 2)\n",
+    "input": null,
+    "expected": true
+  },
+  {
+    "name": "not",
+    "head": "!",
+    "source": "M builtin_not\n\nF main->bool\n  R (! false)\n",
+    "input": null,
+    "expected": true
+  },
+  {
+    "name": "and",
+    "head": "&",
+    "source": "M builtin_and\n\nF main->bool\n  R (& true false)\n",
+    "input": null,
+    "expected": false
+  },
+  {
+    "name": "or",
+    "head": "|",
+    "source": "M builtin_or\n\nF main->bool\n  R (| false true)\n",
+    "input": null,
+    "expected": true
+  },
+  {
+    "name": "concatenate",
+    "head": "cat",
+    "source": "M builtin_cat\n\nF main->str\n  R (cat \"a\" \"b\")\n",
+    "input": null,
+    "expected": "ab"
+  },
+  {
+    "name": "length",
+    "head": "#",
+    "source": "M builtin_length\n\nF main->i64\n  R (# [1 2 3])\n",
+    "input": null,
+    "expected": 3
+  },
+  {
+    "name": "index",
+    "head": "@",
+    "source": "M builtin_index\n\nF main->i64\n  R (@ [4 5] 1)\n",
+    "input": null,
+    "expected": 5
+  },
+  {
+    "name": "field",
+    "head": ".",
+    "source": "M builtin_field\n\nT Box struct\n  value:i64\n\nF main->i64\n  R (. (Box value=7) value)\n",
+    "input": null,
+    "expected": 7
+  },
+  {
+    "name": "buffer",
+    "head": "buf",
+    "source": "M builtin_buffer\n\nF main->i64\n  L values:builder i64 (buf i64 2)\n  R (cap values)\n",
+    "input": null,
+    "expected": 2
+  },
+  {
+    "name": "push",
+    "head": "push",
+    "source": "M builtin_push\n\nF main->[i64]\n  L values:builder i64 (buf i64 2)\n  S values (push values 7)\n  R (finish values)\n",
+    "input": null,
+    "expected": [7]
+  },
+  {
+    "name": "finish",
+    "head": "finish",
+    "source": "M builtin_finish\n\nF main->[i64]\n  L values:builder i64 (buf i64 0)\n  R (finish values)\n",
+    "input": null,
+    "expected": []
+  },
+  {
+    "name": "count",
+    "head": "count",
+    "source": "M builtin_count\n\nF main->i64\n  L values:builder i64 (buf i64 2)\n  R (count values)\n",
+    "input": null,
+    "expected": 0
+  },
+  {
+    "name": "capacity",
+    "head": "cap",
+    "source": "M builtin_capacity\n\nF main->i64\n  L values:builder i64 (buf i64 2)\n  R (cap values)\n",
+    "input": null,
+    "expected": 2
+  },
+  {
+    "name": "cast_i64",
+    "head": "i64",
+    "source": "M builtin_cast_i64\n\nF main->i64\n  R (i64 3.5)\n",
+    "input": null,
+    "expected": 3
+  },
+  {
+    "name": "cast_f64",
+    "head": "f64",
+    "source": "M builtin_cast_f64\n\nF main->f64\n  R (f64 3)\n",
+    "input": null,
+    "expected": 3.0
+  },
+  {
+    "name": "result_ok",
+    "head": "ok",
+    "source": "M builtin_result_ok\n\nF main->result i64 str\n  R (ok 7)\n",
+    "input": null,
+    "expected": {"tag": "ok", "value": 7}
+  },
+  {
+    "name": "result_err",
+    "head": "err",
+    "source": "M builtin_result_err\n\nF main->result i64 str\n  R (err \"bad\")\n",
+    "input": null,
+    "expected": {"tag": "err", "error": "bad"}
+  },
+  {
+    "name": "option_some",
+    "head": "some",
+    "source": "M builtin_option_some\n\nF main->option i64\n  R (some 7)\n",
+    "input": null,
+    "expected": {"tag": "some", "value": 7}
+  },
+  {
+    "name": "option_none",
+    "head": "none",
+    "source": "M builtin_option_none\n\nF main->option i64\n  R (none)\n",
+    "input": null,
+    "expected": {"tag": "none"}
+  }
+]

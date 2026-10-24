@@ -1,0 +1,76 @@
+M http_hello
+
+T Header struct
+  name:str
+  value:str
+
+T Param struct
+  name:str
+  value:str
+
+T Request struct
+  method:str
+  path:str
+  headers:[Header]
+  query:[Param]
+
+T Response struct
+  status:i64
+  content_type:str
+  headers:[Header]
+  body:str
+  content_length:i64
+
+F header_value headers:[Header] name:str->option str
+  E header headers
+    ? (= header.name name)
+      R (some header.value)
+  R (none)
+
+F query_value params:[Param] name:str->option str
+  E param params
+    ? (= param.name name)
+      R (some param.value)
+  R (none)
+
+F request_id_header maybe_id:option str->Header
+  C maybe_id
+    some id
+      R (Header name="X-Request-Id" value=id)
+    none
+      R (Header name="X-Request-Id" value="none")
+
+F method_not_allowed_response incoming_headers:[Header]->Response
+  R (Response status=405 content_type="text/plain" headers=[(Header name="X-App" value="apodexis") (request_id_header (header_value incoming_headers "X-Request-Id")) (Header name="Allow" value="GET")] body="Method Not Allowed" content_length=(# "Method Not Allowed"))
+
+F main input:Request->result Response str
+  ? (= input.path "/")
+    ? (= input.method "GET")
+      C (query_value input.query "name")
+        some name
+          R (ok (Response status=200 content_type="text/plain" headers=[(Header name="X-App" value="apodexis") (request_id_header (header_value input.headers "X-Request-Id"))] body=(cat (cat "Hello, " name) "!") content_length=(# (cat (cat "Hello, " name) "!"))))
+        none
+          R (ok (Response status=200 content_type="text/plain" headers=[(Header name="X-App" value="apodexis") (request_id_header (header_value input.headers "X-Request-Id"))] body=(cat "Hello, " "HTTP!") content_length=(# (cat "Hello, " "HTTP!"))))
+    R (ok (method_not_allowed_response input.headers))
+  R (ok (Response status=404 content_type="text/plain" headers=[(Header name="X-App" value="apodexis") (request_id_header (header_value input.headers "X-Request-Id"))] body="Not Found" content_length=(# "Not Found")))
+
+X root_path
+  A (= (main (Request method="GET" path="/" headers=[] query=[])) (ok (Response status=200 content_type="text/plain" headers=[(Header name="X-App" value="apodexis") (Header name="X-Request-Id" value="none")] body="Hello, HTTP!" content_length=12)))
+
+X not_found_path
+  A (= (main (Request method="GET" path="/foo" headers=[] query=[])) (ok (Response status=404 content_type="text/plain" headers=[(Header name="X-App" value="apodexis") (Header name="X-Request-Id" value="none")] body="Not Found" content_length=9)))
+
+X header_hit
+  A (= (header_value [(Header name="X-Request-Id" value="abc-123")] "X-Request-Id") (some "abc-123"))
+
+X header_miss
+  A (= (header_value [(Header name="X-Other" value="val")] "X-Request-Id") (none))
+
+X root_with_request_id
+  A (= (main (Request method="GET" path="/" headers=[(Header name="X-Request-Id" value="req-42")] query=[])) (ok (Response status=200 content_type="text/plain" headers=[(Header name="X-App" value="apodexis") (Header name="X-Request-Id" value="req-42")] body="Hello, HTTP!" content_length=12)))
+
+X root_with_query
+  A (= (main (Request method="GET" path="/" headers=[] query=[(Param name="name" value="Logan")])) (ok (Response status=200 content_type="text/plain" headers=[(Header name="X-App" value="apodexis") (Header name="X-Request-Id" value="none")] body="Hello, Logan!" content_length=13)))
+
+X post_root_method_not_allowed
+  A (= (main (Request method="POST" path="/" headers=[] query=[])) (ok (Response status=405 content_type="text/plain" headers=[(Header name="X-App" value="apodexis") (Header name="X-Request-Id" value="none") (Header name="Allow" value="GET")] body="Method Not Allowed" content_length=18)))

@@ -1,0 +1,24 @@
+#define _GNU_SOURCE
+#include "../compiler/apx_host.h"
+#include "../runtime/apx_runtime.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/stat.h>
+static unsigned checks;
+static void require(int ok,const char *what){checks++;if(!ok){fprintf(stderr,"host FAIL: %s\n",what);exit(1);}}
+static void save(const char *p,const char *data){FILE *f=fopen(p,"wb");require(f&&fwrite(data,1,strlen(data),f)==strlen(data)&&!fclose(f),"write owned fixture");}
+static char *request(ApxHostPolicy *p,const char *data,int ok,const char *contains){char *result=apx_host_dispatch(p,data,strlen(data));require(result!=NULL,"host response");ApxValue *json=apx_json_parse(result,strlen(result));require(json&&apx_json_integer(apx_json_get(json,"ok"))==ok,"host status");require(!contains||strstr(result,contains)!=NULL,contains?contains:"response");apx_json_reset();return result;}
+int main(void){char dir[]=".build/host-unit-XXXXXX";require(mkdtemp(dir)!=NULL,"owned root");char *absolute=realpath(dir,NULL);require(absolute!=NULL,"absolute root");char policy[4096],input[4096],output[4096],symlink_path[4096],hardlink_path[4096];snprintf(policy,sizeof policy,"%s/policy.json",dir);snprintf(input,sizeof input,"%s/input.txt",dir);snprintf(output,sizeof output,"%s/output.txt",dir);snprintf(symlink_path,sizeof symlink_path,"%s/link",dir);snprintf(hardlink_path,sizeof hardlink_path,"%s/hard",dir);save(input,"hello");require(!setenv("APX_TEST_HOST_ONLY","fixture-value",1),"fixture env");char raw[10000];snprintf(raw,sizeof raw,"{\"schema\":\"apodexis.host_policy.v1\",\"read_root\":\"%s\",\"write_root\":\"%s\",\"env\":[\"APX_TEST_HOST_ONLY\"],\"clock\":true,\"random\":true,\"max_bytes\":128,\"max_requests\":64}",absolute,absolute);save(policy,raw);char *error=NULL;ApxHostPolicy *p=apx_host_policy_load(policy,&error);require(p&&!error,"valid explicit policy");
+ free(request(NULL,"{\"op\":\"fs_read\",\"args\":[\"input.txt\"]}",0,"capability_denied"));
+ free(request(p,"{\"op\":\"fs_read\",\"args\":[\"input.txt\"]}",1,"hello"));
+ free(request(p,"{\"op\":\"fs_write\",\"args\":[\"output.txt\",\"written\"]}",1,"7"));FILE *f=fopen(output,"rb");char written[32]={0};require(f&&fread(written,1,31,f)==7&&!fclose(f)&&!strcmp(written,"written"),"exact external write readback");
+ free(request(p,"{\"op\":\"fs_read\",\"args\":[\"../outside\"]}",0,"filesystem_read_denied"));
+ free(request(p,"{\"op\":\"fs_write\",\"args\":[\"/outside\",\"x\"]}",0,"filesystem_write_denied"));
+ require(!symlink("input.txt",symlink_path),"symlink fixture");free(request(p,"{\"op\":\"fs_read\",\"args\":[\"link\"]}",0,"filesystem_read_failed"));free(request(p,"{\"op\":\"fs_write\",\"args\":[\"link\",\"x\"]}",0,"filesystem_write_denied"));
+ require(!link(input,hardlink_path),"hardlink fixture");free(request(p,"{\"op\":\"fs_write\",\"args\":[\"hard\",\"x\"]}",0,"filesystem_write_denied"));free(request(p,"{\"op\":\"fs_read\",\"args\":[\"hard\"]}",0,"filesystem_read_failed"));require(!unlink(hardlink_path),"hardlink cleanup");
+ free(request(p,"{\"op\":\"env_get\",\"args\":[\"APX_TEST_HOST_ONLY\"]}",1,"fixture-value"));free(request(p,"{\"op\":\"env_get\",\"args\":[\"HOME\"]}",0,"environment_denied"));
+ char *result=request(p,"{\"op\":\"clock_ms\",\"args\":[]}",1,NULL);ApxValue *json=apx_json_parse(result,strlen(result));require(apx_json_integer(apx_json_get(json,"value"))>0,"real clock result");free(result);apx_json_reset();result=request(p,"{\"op\":\"random_hex\",\"args\":[16]}",1,NULL);json=apx_json_parse(result,strlen(result));require(apx_json_length(apx_json_get(json,"value"))==32,"actual entropy encoded size");free(result);apx_json_reset();free(request(p,"{\"op\":\"random_hex\",\"args\":[257]}",0,"random_size_limit"));
+ free(request(p,"{\"op\":\"http_get\",\"args\":[\"http://127.0.0.1:1/\"]}",0,"http_get_denied"));free(request(p,"{\"op\":\"spawn\",\"args\":[\"command\"]}",0,"invalid_host_request"));free(request(p,"{\"op\":\"fs_read\",\"args\":[\"input.txt\"],\"extra\":true}",0,"invalid_host_request"));
+ apx_host_policy_free(p);save(policy,"{\"schema\":\"apodexis.host_policy.v1\",\"clock\":false,\"max_requests\":1}");p=apx_host_policy_load(policy,&error);require(p&&!error,"deny policy");free(request(p,"{\"op\":\"clock_ms\",\"args\":[]}",0,"clock_denied"));free(request(p,"{\"op\":\"clock_ms\",\"args\":[]}",0,"host_request_limit"));apx_host_policy_free(p);save(policy,"{\"schema\":\"apodexis.host_policy.v1\",\"shell\":true}");p=apx_host_policy_load(policy,&error);require(!p&&error,"policy fails closed on unknown grants");free(error);unlink(input);unlink(output);unlink(symlink_path);unlink(policy);require(!rmdir(dir),"owned fixtures cleaned");free(absolute);apx_json_reset();printf("native host broker: %u checks; actual file read/write, env, clock, entropy and deny/path/symlink/hardlink/limit controls PASS\n",checks);return 0;}

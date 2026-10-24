@@ -1,0 +1,37 @@
+name: Feature request
+description: Propose a concrete improvement to the implemented language or tools.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe a real use case, not an assumed commitment to ship it. Use
+        sanitized examples. For sensitive findings, follow the
+        [security policy](https://github.com/doesntdev/apodexis/security/policy).
+  - type: textarea
+    id: need
+    attributes:
+      label: User need
+      description: What task is difficult today? Include a minimal example and the revision or bundle identity you evaluated.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the smallest useful change, expected source/JSON behavior and how it could be verified.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Current behavior and alternatives
+      description: What did you actually try? Include observed results or explain why existing operations do not meet the need.
+    validations:
+      required: true
+  - type: textarea
+    id: boundaries
+    attributes:
+      label: Compatibility and safety impact
+      description: Note possible canonical-identity, ABI, dependency, resource-limit or host-authority changes. Unknowns are welcome; do not include private data.
+    validations:
+      required: false

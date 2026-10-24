@@ -1,0 +1,17 @@
+{
+  "status": "error",
+  "diagnostics": [
+    {
+      "code": "H001",
+      "kind": "typed_hole",
+      "span": {
+        "start_byte": 29,
+        "end_byte": 30,
+        "start_line": 4,
+        "start_column": 5,
+        "end_line": 4,
+        "end_column": 6
+      }
+    }
+  ]
+}

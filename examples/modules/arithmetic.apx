@@ -1,0 +1,17 @@
+M arithmetic
+
+V double
+V Point
+
+T Point struct
+  x:i64
+  y:i64
+
+F multiply value:i64 factor:i64->i64
+  R (* value factor)
+
+F double value:i64->i64
+  R (multiply value 2)
+
+X double_checks
+  A (= (double 4) 8)

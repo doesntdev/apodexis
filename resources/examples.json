@@ -1,0 +1,22 @@
+[
+  {
+    "name": "hello",
+    "description": "Return a constant string and assert the result.",
+    "source": "M hello\n\nF main->str\n  R \"Hello, world!\"\n\nX hello_output\n  A (= (main) \"Hello, world!\")\n"
+  },
+  {
+    "name": "add_two",
+    "description": "Accept an i64 input, add two, and test the function.",
+    "source": "M add_two\n\nF main input:i64->i64\n  R (+ input 2)\n\nX adds_two\n  A (= (main 3) 5)\n"
+  },
+  {
+    "name": "compact_authoring",
+    "description": "Postfix field/index reads, P builder writeback, inferred locals and explicitly typed empty/variant contexts, including alias snapshot tests.",
+    "source": "M compact_authoring\n\nT Row struct\n  values:[i64]\n\nT Input struct\n  rows:[Row]\n\nF double_firsts input:Input->[i64]\n  L out (buf i64 (# input.rows))\n  E row input.rows\n    P out (* row.values[0] 2)\n  R (finish out)\n\nF main input:Input->[i64]\n  R (double_firsts input)\n\nX empty_rows\n  A (= (main (Input rows=[])) [])\n\nX first_values\n  A (= (main (Input rows=[(Row values=[1 2]) (Row values=[3 4])])) [2 6])\n\nX immutable_aliases\n  L out (buf i64 2)\n  L original out\n  P out 7\n  L snapshot (finish out)\n  P out (count out)\n  A (= (finish original) [])\n  A (= snapshot [7])\n  A (= (finish out) [7 1])\n\nX necessary_annotations\n  L empty:[str] []\n  A (= (# empty) 0)\n  L missing:option i64 (none)\n  C missing\n    some value\n      A false\n    none\n      A true\n"
+  },
+  {
+    "name": "pure_data",
+    "description": "Strict numeric parsing, typed maps, Unicode strings and immutable record/array snapshots.",
+    "source": "M pure_data\nT Row struct\n  score:i64\nF main input:str->result map i64 str\n  C (parse_i64 (str_trim input))\n    ok value\n      R (ok (map_put (map i64) \"value\" value))\n    err problem\n      R (err problem)\nX parsed\n  A (= (main \" 42 \") (ok (map_put (map i64) \"value\" 42)))\nX snapshots\n  L original (Row score=1)\n  L revised (with original score=2)\n  A (= original.score 1)\n  A (= revised.score 2)\n  A (= (array_set [1 2] 0 9) [9 2])\n  A (= (str_slice \"aé😀\" 1 2) \"é😀\")\n"
+  }
+]

@@ -1,0 +1,22 @@
+{
+  "output": {
+    "tag": "ok",
+    "value": {
+      "body": "<html><head><link rel=stylesheet href=/style.css></head><body><h1>Apodexis</h1><script src=/app.js></script></body></html>",
+      "content_length": 122,
+      "content_type": "text/html",
+      "headers": [
+        {
+          "name": "X-App",
+          "value": "apodexis"
+        },
+        {
+          "name": "X-Request-Id",
+          "value": "none"
+        }
+      ],
+      "status": 200
+    }
+  },
+  "status": "ok"
+}

@@ -1,0 +1,9 @@
+M modular_app
+
+I math "arithmetic"
+
+F main input:math::Point->i64
+  R (+ (math::double input.x) input.y)
+
+X application
+  A (= (main (math::Point x=3 y=4)) 10)

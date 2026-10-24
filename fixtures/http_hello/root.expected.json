@@ -1,0 +1,22 @@
+{
+  "output": {
+    "tag": "ok",
+    "value": {
+      "body": "Hello, HTTP!",
+      "content_length": 12,
+      "content_type": "text/plain",
+      "headers": [
+        {
+          "name": "X-App",
+          "value": "apodexis"
+        },
+        {
+          "name": "X-Request-Id",
+          "value": "none"
+        }
+      ],
+      "status": 200
+    }
+  },
+  "status": "ok"
+}

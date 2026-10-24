@@ -1,0 +1,6 @@
+{
+  "headers": [],
+  "method": "GET",
+  "path": "/",
+  "query": [{"name": "name", "value": "Logan"}]
+}

@@ -1,0 +1,17 @@
+{
+  "status": "error",
+  "diagnostics": [
+    {
+      "code": "N102",
+      "kind": "duplicate_symbol",
+      "span": {
+        "start_byte": 32,
+        "end_byte": 35,
+        "start_line": 6,
+        "start_column": 3,
+        "end_line": 6,
+        "end_column": 6
+      }
+    }
+  ]
+}

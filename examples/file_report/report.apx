@@ -1,0 +1,62 @@
+M report
+
+V Summary
+V analyze
+V render
+
+T Summary struct
+  counts:map i64
+  total:i64
+  label:str
+
+F analyze text:str->result Summary str
+  L counts (map i64)
+  L total 0
+  E line (str_split text "\n")
+    L clean (str_trim line)
+    ? (! (= clean ""))
+      L fields (str_split clean ",")
+      ? (! (= (# fields) 2))
+        R (err "expected name,count")
+      L name (str_trim fields[0])
+      C (parse_i64 (str_trim fields[1]))
+        ok quantity
+          L previous 0
+          C (map_get counts name)
+            some value
+              S previous value
+            none
+              A true
+          S counts (map_put counts name (+ previous quantity))
+          S total (+ total quantity)
+        err problem
+          R (err problem)
+  R (ok (Summary counts=counts total=total label="parsed"))
+
+F render summary:Summary->str
+  L text ""
+  E key (map_keys summary.counts)
+    C (map_get summary.counts key)
+      some value
+        S text (cat text (cat (cat key ",") (cat (str_i64 value) "\n")))
+      none
+        Z "map keys/get disagreement"
+  R text
+
+X accumulate
+  C (analyze " alpha,2\nbeta,3\nalpha,4\n")
+    ok summary
+      A (= summary.total 9)
+      A (= (render summary) "alpha,6\nbeta,3\n")
+      L updated (with summary label="changed")
+      A (= summary.label "parsed")
+      A (= updated.label "changed")
+    err problem
+      A false
+
+X malformed
+  C (analyze "invalid")
+    ok summary
+      A false
+    err problem
+      A (= problem "expected name,count")

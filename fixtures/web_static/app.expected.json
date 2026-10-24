@@ -1,0 +1,22 @@
+{
+  "output": {
+    "tag": "ok",
+    "value": {
+      "body": "console.log('apodexis loaded')",
+      "content_length": 30,
+      "content_type": "application/javascript",
+      "headers": [
+        {
+          "name": "X-App",
+          "value": "apodexis"
+        },
+        {
+          "name": "X-Request-Id",
+          "value": "none"
+        }
+      ],
+      "status": 200
+    }
+  },
+  "status": "ok"
+}

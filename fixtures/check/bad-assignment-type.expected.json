@@ -1,0 +1,17 @@
+{
+  "status": "error",
+  "diagnostics": [
+    {
+      "code": "T101",
+      "kind": "type_mismatch",
+      "span": {
+        "start_byte": 37,
+        "end_byte": 47,
+        "start_line": 5,
+        "start_column": 1,
+        "end_line": 5,
+        "end_column": 11
+      }
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+M bad
+
+T Row struct
+  id:str
+
+T Row struct
+  id:str
+
+F main x:i64->i64
+  R x

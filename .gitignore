@@ -1,0 +1,32 @@
+# Native build and distribution outputs.
+/.build/
+/bin/apodexis
+/bin/apx-mcp
+/third_party/qbe/*.o
+/third_party/qbe/*/*.o
+/third_party/qbe/qbe
+/third_party/qbe/config.h
+*.log
+
+# Local tooling, planning and scratch data.
+/.scratch/
+/graphify-out/
+/tmp/
+__pycache__/
+*.pyc
+
+# Operator-owned configuration and credentials.
+.env
+.env.*
+!.env.example
+!*.env.example
+/policy.local.json
+/capabilities.local.json
+/secrets/
+/credentials/
+*.key
+*.pem
+*.p12
+*.pfx
+id_rsa
+id_ed25519

@@ -1,0 +1,9 @@
+{
+  "upstream": "https://c9x.me/compile/",
+  "release": "1.3",
+  "source_archive": "https://c9x.me/compile/release/qbe-1.3.tar.xz",
+  "source_sha256": "d587905d620dc5e1d2bfa7c2cc642b9b837aa89a3188c6e37b53d756cf66e320",
+  "license": "MIT",
+  "tested_target": "amd64_sysv",
+  "other_targets": "Upstream provides additional targets; Apodexis deployment support is limited to the tested target."
+}

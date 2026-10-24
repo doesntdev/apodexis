@@ -1,0 +1,6 @@
+{
+  "headers": [{"name": "X-Request-Id", "value": "req-42"}],
+  "method": "GET",
+  "path": "/",
+  "query": []
+}

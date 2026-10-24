@@ -1,0 +1,31 @@
+M file_report
+
+I report "report"
+
+T Input struct
+  source:str
+  destination:str
+
+F main input:Input->result report::Summary str
+  C (fs_read input.source)
+    ok contents
+      C (report::analyze contents)
+        ok summary
+          L output (report::render summary)
+          C (fs_write input.destination output)
+            ok bytes
+              R (ok (with summary label="written"))
+            err problem
+              R (err problem)
+        err problem
+          R (err problem)
+    err problem
+      R (err problem)
+
+X empty_report
+  C (report::analyze "")
+    ok summary
+      A (= summary.total 0)
+      A (= (report::render summary) "")
+    err problem
+      A false

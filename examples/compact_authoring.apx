@@ -1,0 +1,42 @@
+M compact_authoring
+
+T Row struct
+  values:[i64]
+
+T Input struct
+  rows:[Row]
+
+F double_firsts input:Input->[i64]
+  L out (buf i64 (# input.rows))
+  E row input.rows
+    P out (* row.values[0] 2)
+  R (finish out)
+
+F main input:Input->[i64]
+  R (double_firsts input)
+
+X empty_rows
+  A (= (main (Input rows=[])) [])
+
+X first_values
+  A (= (main (Input rows=[(Row values=[1 2]) (Row values=[3 4])])) [2 6])
+
+X immutable_aliases
+  L out (buf i64 2)
+  L original out
+  P out 7
+  L snapshot (finish out)
+  P out (count out)
+  A (= (finish original) [])
+  A (= snapshot [7])
+  A (= (finish out) [7 1])
+
+X necessary_annotations
+  L empty:[str] []
+  A (= (# empty) 0)
+  L missing:option i64 (none)
+  C missing
+    some value
+      A false
+    none
+      A true

@@ -1,0 +1,4 @@
+M bad
+
+F main x:i64->builder str
+  R (buf str 1)

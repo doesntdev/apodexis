@@ -1,0 +1,7 @@
+M bad
+
+T Row struct
+  id:str
+
+F main row:Row->str
+  R (. row hash)
