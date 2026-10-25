@@ -7,7 +7,8 @@ inspect the language, submit source, receive structured diagnostics, apply
 compiler-issued repairs, run source-declared tests, and execute against typed JSON
 input under explicit limits. Humans can use the same compiler from the command line.
 
-**Start here:** [Language specification](docs/specification.md) ·
+**Start here:** [Project website](https://doesntdev.github.io/apodexis/) ·
+[Language specification](docs/specification.md) ·
 [Initial setup](#initial-setup) · [Examples](#examples) ·
 [Agent integration](#agent-integration-with-mcp) ·
 [Contributing](CONTRIBUTING.md) · [MIT license](LICENSE)
