@@ -1,0 +1,18 @@
+M nested_record
+
+T Detail struct
+  values:[i64]
+  label:str
+
+T Input struct
+  detail:Detail
+  unrelated:[str]
+
+F main input:Input->i64
+  L index:i64 0
+  L total:i64 0
+  W (< index (# (. (. input detail) values)))
+    S total (+ total (@ (. (. input detail) values) index))
+    S total (+ total (# (. (. input detail) label)))
+    S index (+ index 1)
+  R total

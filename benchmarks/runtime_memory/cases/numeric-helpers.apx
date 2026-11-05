@@ -1,0 +1,12 @@
+M numeric_helpers
+
+F adjust value:i64->i64
+  R (+ (* value 3) 7)
+
+F main input:i64->i64
+  L index:i64 0
+  L total:i64 0
+  W (< index input)
+    S total (+ total (adjust index))
+    S index (+ index 1)
+  R total

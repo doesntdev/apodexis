@@ -1,0 +1,102 @@
+M rowdiff
+
+T Row struct
+  id:str
+  hash:str
+
+T Diff struct
+  added:[str]
+  removed:[str]
+  changed:[str]
+
+T Pair struct
+  before:[Row]
+  after:[Row]
+
+F has_duplicate rows:[Row]->bool
+  L n:i64 (# rows)
+  L i:i64 0
+  W (< i n)
+    L j:i64 (+ i 1)
+    W (< j n)
+      ? (= (. (@ rows i) id) (. (@ rows j) id))
+        R true
+      S j (+ j 1)
+    S i (+ i 1)
+  R false
+
+F contains rows:[Row] id:str->bool
+  E row rows
+    ? (= (. row id) id)
+      R true
+  R false
+
+F hash_of rows:[Row] id:str->str
+  E row rows
+    ? (= (. row id) id)
+      R (. row hash)
+  R ""
+
+F diff before:[Row] after:[Row]->result Diff str
+  ? (has_duplicate before)
+    R (err "duplicate id in before")
+  ? (has_duplicate after)
+    R (err "duplicate id in after")
+  L added:builder str (buf str (# after))
+  L changed:builder str (buf str (# after))
+  L removed:builder str (buf str (# before))
+  E row after
+    ? (contains before (. row id))
+      ? (! (= (hash_of before (. row id)) (. row hash)))
+        S changed (push changed (. row id))
+    ? (! (contains before (. row id)))
+      S added (push added (. row id))
+  E row before
+    ? (! (contains after (. row id)))
+      S removed (push removed (. row id))
+  R (ok (Diff added=(finish added) removed=(finish removed) changed=(finish changed)))
+
+F main input:Pair->result Diff str
+  R (diff (. input before) (. input after))
+
+X unchanged
+  C (diff [ (Row id="a" hash="h1") (Row id="b" hash="h2") ] [ (Row id="a" hash="h1") (Row id="b" hash="h2") ])
+    ok result
+      A (= result (Diff added=[] removed=[] changed=[]))
+    err problem
+      A false
+
+X added
+  C (diff [ (Row id="a" hash="h1") (Row id="b" hash="h2") ] [ (Row id="c" hash="h3") (Row id="a" hash="h1") (Row id="d" hash="h4") ])
+    ok result
+      A (= result (Diff added=["c" "d"] removed=["b"] changed=[]))
+    err problem
+      A false
+
+X removed
+  C (diff [ (Row id="a" hash="h1") (Row id="b" hash="h2") (Row id="c" hash="h3") ] [ (Row id="c" hash="h3") (Row id="a" hash="h1") ])
+    ok result
+      A (= result (Diff added=[] removed=["b"] changed=[]))
+    err problem
+      A false
+
+X changed
+  C (diff [ (Row id="a" hash="h1") (Row id="b" hash="h2") ] [ (Row id="b" hash="h9") (Row id="a" hash="h1") ])
+    ok result
+      A (= result (Diff added=[] removed=[] changed=["b"]))
+    err problem
+      A false
+
+X duplicate_before
+  C (diff [ (Row id="a" hash="h1") (Row id="a" hash="h2") ] [ (Row id="b" hash="h3") ])
+    ok result
+      A false
+    err problem
+      A (= problem "duplicate id in before")
+
+X duplicate_after
+  C (diff [ (Row id="a" hash="h1") ] [ (Row id="b" hash="h3") (Row id="b" hash="h4") ])
+    ok result
+      A false
+    err problem
+      A (= problem "duplicate id in after")

@@ -1,0 +1,11 @@
+M finish_prefixes
+F main input:i64->i64
+  L out (buf i64 input)
+  L index 0
+  L total 0
+  W (< index input)
+    P out index
+    S total (+ total (# (finish out)))
+    S total (+ total (# (finish out)))
+    S index (+ index 1)
+  R total

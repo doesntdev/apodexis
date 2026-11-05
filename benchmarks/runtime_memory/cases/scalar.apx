@@ -1,0 +1,3 @@
+M scalar
+F main input:i64->i64
+  R (+ input 1)

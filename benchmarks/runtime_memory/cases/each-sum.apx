@@ -1,0 +1,7 @@
+M each_sum
+
+F main input:[i64]->i64
+  L total:i64 0
+  E item input
+    S total (+ total item)
+  R total

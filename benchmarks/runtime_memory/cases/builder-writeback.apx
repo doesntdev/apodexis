@@ -1,0 +1,9 @@
+M builder_writeback
+
+F main input:i64->[i64]
+  L out:builder i64 (buf i64 input)
+  L index:i64 0
+  W (< index input)
+    S out (push out index)
+    S index (+ index 1)
+  R (finish out)

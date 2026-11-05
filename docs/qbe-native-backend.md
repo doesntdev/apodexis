@@ -126,6 +126,39 @@ hash and compiler-issued-payload preconditions. They return revised inline
 source rather than writing files. Pseudocode is a readable projection, not an
 alternative executable contract.
 
+## Runtime allocation and construction
+
+Runtime values use bounded, zero-initialized execution-lifetime arenas. Small
+objects bump through pooled blocks with at most 1 KiB of backing per block;
+large requests receive exact-sized dedicated backing without displacing the
+small-object pool. Returned addresses remain stable. Reset frees every linked
+block and clears allocation/call-depth state without resetting semantic fuel.
+There is no cross-invocation arena cache, garbage collector, reference counting,
+large sparse reservation or new ownership annotation.
+
+The requested-payload limit remains 128 MiB. Arena backing has a separate
+256 MiB ceiling including block headers, padding and unused capacity. These are
+not RSS measurements and do not increase the native worker's existing
+address-space limit. The library-only CLI/MCP JSON implementation uses the same
+allocator. Parsed values live until reset; encoded JSON strings remain
+separately allocated, caller-owned strings valid after reset.
+
+Builders use append-only blocks containing up to 64 element references. A
+snapshot's length bounds its visible prefix. Appending at that block's current
+frontier writes only a previously invisible slot; a divergent alias starts a new
+block. `finish` materializes an indexed array and caches that immutable result
+for repeated finishes of the same snapshot. This does not consume the builder,
+mutate earlier arrays, preallocate the declared full capacity, or enlarge every
+scalar value. Other arrays/records retain their existing direct construction.
+
+Allocation representation can change OOM timing, but not the structured failure
+contract or the quota itself. ASan builds add poisoned logical-object boundaries
+inside arena blocks; selected developer sanitizer paths are not full generated
+worker sanitizer coverage. The optional [memory benchmark tooling](../benchmarks/runtime_memory/README.md)
+keeps timing, allocation counters, peak RSS and installed-process checks at
+separate boundaries. It is not a compiler/runtime dependency or a universal
+performance claim.
+
 ## Boundaries
 
 - **Platform:** Linux x86-64/glibc with QBE `amd64_sysv`. Other backend targets are
