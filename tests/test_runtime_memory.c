@@ -13,8 +13,13 @@ static void *tracked_calloc(size_t n,size_t size){
     return calloc(n,size);
 }
 static void tracked_free(void *p){if(p)free_calls++;free(p);}
+static size_t copied_bytes;
+static void *tracked_memcpy(void *dst,const void *src,size_t n){
+    copied_bytes+=n;return memcpy(dst,src,n);
+}
 #define calloc tracked_calloc
 #define free tracked_free
+#define memcpy tracked_memcpy
 #define APX_LIBRARY_ONLY
 #ifndef APX_RUNTIME_SOURCE
 #define APX_RUNTIME_SOURCE "../runtime/apx_runtime.c"
@@ -22,6 +27,7 @@ static void tracked_free(void *p){if(p)free_calls++;free(p);}
 #include APX_RUNTIME_SOURCE
 #undef calloc
 #undef free
+#undef memcpy
 
 static unsigned checks;
 static void require(int ok,const char *message){
@@ -80,6 +86,70 @@ static void limits(void){
     require(encoded&&!strcmp(encoded,"17"),"successful execution after allocation failures");
     reset_memory();require(!strcmp(encoded,"17"),"caller-owned encoding survives reset");free(encoded);
 }
+static void builder_values(ApxValue *builder,size_t prefix,int64_t suffix,int appended){
+    ApxValue *one=apx_builtin(21,builder,NULL),*two=apx_builtin(21,builder,NULL);
+    require(one->kind==VARRAY&&one->length==prefix+(size_t)appended,"finished snapshot length");
+    require(one->items==two->items,"repeat finish reuses immutable materialization");
+    for(size_t i=0;i<prefix;i++)require(integer(apx_at_raw(one,(int64_t)i))==(int64_t)i,"snapshot prefix retains original order");
+    if(appended)require(integer(apx_at_raw(one,(int64_t)prefix))==suffix,"branch has its own appended value");
+}
+static void builder_failure(int32_t op,ApxValue *builder,ApxValue *item){
+    jmp_buf local;jmp_buf *previous=trap_target;trap_target=&local;fail_next_calloc=1;
+    if(!setjmp(local)){(void)apx_builtin(op,builder,item);require(0,"expected builder allocation failure");}
+    else require(!strcmp(error_code,"R204")&&!strcmp(error_kind,"memory_limit_exceeded")&&!fail_next_calloc,
+                 "builder fails through the injected backing allocator");
+    trap_target=previous;
+}
+static void builder_recovery(ApxValue *prefix){
+    ApxValue *item=apx_int(-3);
+    struct BuilderBlock *tail=prefix->members.builder_tail;
+    size_t used=tail->used;
+    /* Fail the new snapshot allocation before any shared block can be changed. */
+    arena_current=NULL;builder_failure(20,prefix,item);
+    require(tail->used==used,"failed snapshot allocation leaves shared frontier intact");
+    builder_values(prefix,64,0,0);
+    /* Let the value wrapper fit, then fail a required new full-size tail block. */
+    arena_current=NULL;(void)allocate(0);
+    builder_failure(20,prefix,item);
+    require(tail->used==used,"failed tail allocation leaves shared frontier intact");
+    builder_values(prefix,64,0,0);
+    ApxValue *retry=apx_builtin(20,prefix,item);
+    require(!retry->items,"new builder materialization is initially absent");
+    arena_current=NULL;(void)allocate(0);
+    builder_failure(21,retry,NULL);
+    require(!retry->items,"failed finish does not publish a partial cache");
+    builder_values(retry,64,-3,1);
+    builder_values(prefix,64,0,0);
+}
+static void builders(void){
+    /* The representation must not add a word to every scalar/record value. */
+    struct OriginalValueLayout {
+        enum Kind kind;int64_t integer;double real;const char *text;
+        size_t length,capacity;ApxValue **items;const char **names;size_t *key_lengths;
+    };
+    require(sizeof(ApxValue)==sizeof(struct OriginalValueLayout),"builder storage does not enlarge other values");
+    ApxValue *versions[193];versions[0]=apx_builtin(19,apx_int(256),NULL);
+    for(size_t i=0;i<192;i++){
+        ApxValue *item=apx_int((int64_t)i);size_t before=copied_bytes;
+        versions[i+1]=apx_builtin(20,versions[i],item);
+        require(copied_bytes==before,"append does not copy previous prefix items");
+        if(i%17==0)builder_values(versions[i+1],i+1,0,0);
+    }
+    /* Exercise both sides of full and partial block boundaries and old aliases. */
+    const size_t prefixes[]={0,1,31,32,63,64,65,127,128,129,191,192};
+    for(size_t i=0;i<sizeof prefixes/sizeof prefixes[0];i++){
+        size_t n=prefixes[i];ApxValue *original=versions[n];
+        ApxValue *left=apx_builtin(20,original,apx_int(-1));
+        ApxValue *right=apx_builtin(20,original,apx_int(-2));
+        builder_values(original,n,0,0);builder_values(left,n,-1,1);builder_values(right,n,-2,1);
+        require(integer(apx_builtin(22,original,NULL))==(int64_t)n,"count is snapshot-local");
+        require(integer(apx_builtin(23,right,NULL))==256,"capacity survives branches");
+        require(apx_truth(apx_builtin(6,original,versions[n])),"generic equality handles builder representation");
+        require(!apx_truth(apx_builtin(6,left,right)),"generic equality distinguishes divergent builder values");
+    }
+    builder_recovery(versions[64]);
+    builder_values(versions[192],192,0,0);reset_memory();
+}
 int main(int argc,char **argv){
     if(argc==2&&!strcmp(argv[1],"--overrun")){
         volatile unsigned char *p=allocate(1);p[1]=7;return 0;
@@ -87,7 +157,7 @@ int main(int argc,char **argv){
     if(argc==2&&!strcmp(argv[1],"--after-reset")){
         volatile unsigned char *p=allocate(1);reset_memory();*p=7;return 0;
     }
-    require(argc==1,"valid test arguments");storage();limits();
-    printf("runtime memory: %u checks; alignment/zeroing/stability/chunking/quota/backing/reset/recovery PASS\n",checks);
+    require(argc==1,"valid test arguments");storage();limits();builders();
+    printf("runtime memory: %u checks; alignment/zeroing/stability/chunking/quota/backing/reset/recovery/builder branching PASS\n",checks);
     return 0;
 }

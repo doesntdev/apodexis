@@ -51,15 +51,28 @@
 #endif
 
 enum Kind { VNULL, VBOOL, VINT, VFLOAT, VSTR, VARRAY, VRECORD, VVARIANT, VBUILDER, VMAP };
+struct BuilderBlock;
 struct ApxValue {
     enum Kind kind;
     int64_t integer;
     double real;
     const char *text;
     size_t length, capacity;
-    ApxValue **items;
-    const char **names;
+    ApxValue **items; /* Builders memoize immutable finished items here. */
+    union {
+        const char **names;
+        struct BuilderBlock *builder_tail;
+    } members;
     size_t *key_lengths; /* Raw JSON objects and typed maps retain embedded NUL. */
+};
+/* A snapshot's length clips its tail block. Appending at the current frontier
+ * fills only a previously invisible slot; a divergent alias starts a new block.
+ * No existing prefix is copied or overwritten, and no scalar value grows. */
+#define APX_BUILDER_BLOCK_CAPACITY 64u
+struct BuilderBlock {
+    struct BuilderBlock *previous;
+    size_t prefix_length, used, capacity;
+    ApxValue *items[];
 };
 union ArenaAlignment { long double real; int64_t integer; void *pointer; };
 struct ArenaAlignmentProbe { char byte; union ArenaAlignment aligned; };
@@ -176,12 +189,12 @@ void apx_array_put(ApxValue *array, int64_t index, ApxValue *item) {
 }
 ApxValue *apx_record_new(const char *name, int64_t n) {
     size_check(n, sizeof(ApxValue *)); ApxValue *out = value(VRECORD); out->text = name; out->length = (size_t)n;
-    out->items = allocate(out->length * sizeof *out->items); out->names = allocate(out->length * sizeof *out->names); return out;
+    out->items = allocate(out->length * sizeof *out->items); out->members.names = allocate(out->length * sizeof *out->members.names); return out;
 }
 void apx_record_put(ApxValue *record, int64_t index, const char *name, ApxValue *item) {
     if (!record || record->kind != VRECORD || index < 0 || (uint64_t)index >= record->length)
         fail("R999", "runtime", "trap", "invalid native record initialization");
-    record->names[index] = name; record->items[index] = item;
+    record->members.names[index] = name; record->items[index] = item;
 }
 ApxValue *apx_variant(const char *tag, ApxValue *payload) {
     ApxValue *out = value(VVARIANT); out->text = tag; out->length = payload ? 1 : 0;
@@ -193,21 +206,21 @@ ApxValue *apx_payload(ApxValue *v) {
         fail("T101", "type", "type_mismatch", "variant has no payload");
     return v->items[0];
 }
-static size_t key_length(ApxValue *v,size_t i){return v->key_lengths?v->key_lengths[i]:strlen(v->names[i]);}
+static size_t key_length(ApxValue *v,size_t i){return v->key_lengths?v->key_lengths[i]:strlen(v->members.names[i]);}
 static int key_compare(const char *a,size_t an,const char *b,size_t bn){
     size_t n=an<bn?an:bn; int cmp=memcmp(a,b,n);
     return cmp?cmp:(an>bn)-(an<bn);
 }
 static ApxValue *find_key(ApxValue *v,const char *name,size_t length){
     if(!v || (v->kind!=VRECORD&&v->kind!=VMAP))return NULL;
-    for(size_t i=0;i<v->length;i++)if(!key_compare(v->names[i],key_length(v,i),name,length))return v->items[i];
+    for(size_t i=0;i<v->length;i++)if(!key_compare(v->members.names[i],key_length(v,i),name,length))return v->items[i];
     return NULL;
 }
 ApxValue *apx_record_copy(ApxValue *v){
     if(!v||v->kind!=VRECORD)fail("T101","type","type_mismatch","with expects struct");
     ApxValue *out=apx_record_new(v->text,(int64_t)v->length);
     memcpy(out->items,v->items,v->length*sizeof *out->items);
-    memcpy(out->names,v->names,v->length*sizeof *out->names);
+    memcpy(out->members.names,v->members.names,v->length*sizeof *out->members.names);
     out->key_lengths=v->key_lengths;return out;
 }
 static ApxValue *find_field(ApxValue *v, const char *name) {
@@ -252,6 +265,27 @@ void apx_missing_return(void) { fail("T105", "type", "missing_return", "function
 void apx_enter(void) { if (++call_depth > APX_DEPTH) fail("R205", "runtime", "recursion_limit_exceeded", "native recursion limit exceeded"); }
 void apx_leave(void) { if (call_depth) --call_depth; }
 
+static ApxValue **builder_items(ApxValue *builder) {
+    if (!builder->items && builder->length) {
+        size_check((int64_t)builder->length, sizeof(ApxValue *));
+        ApxValue **items = allocate(builder->length * sizeof *items);
+        struct BuilderBlock *block = builder->members.builder_tail;
+        size_t end = builder->length;
+        while (end) {
+            if (!block || block->prefix_length >= end || block->used > block->capacity ||
+                end - block->prefix_length > block->used)
+                fail("R999", "runtime", "trap", "invalid builder storage");
+            size_t count = end - block->prefix_length;
+            memcpy(items + block->prefix_length, block->items, count * sizeof *items);
+            end = block->prefix_length; block = block->previous;
+        }
+        /* Publish only a complete immutable materialization. Later appends do
+         * not modify these items, including when they share a partial block. */
+        builder->items = items;
+    }
+    return builder->items;
+}
+
 static int equal(ApxValue *a, ApxValue *b, unsigned depth) {
     if (depth > APX_DEPTH) fail("R205", "runtime", "recursion_limit_exceeded", "value comparison too deep");
     if (!a || !b) return a == b;
@@ -263,18 +297,21 @@ static int equal(ApxValue *a, ApxValue *b, unsigned depth) {
     case VSTR: return a->length == b->length && memcmp(a->text, b->text, a->length) == 0;
     case VRECORD:
         if (strcmp(a->text, b->text) || a->length != b->length) return 0;
-        for (size_t i = 0; i < a->length; ++i) if (!equal(a->items[i], find_field(b,a->names[i]), depth+1)) return 0;
+        for (size_t i = 0; i < a->length; ++i) if (!equal(a->items[i], find_field(b,a->members.names[i]), depth+1)) return 0;
         return 1;
     case VVARIANT:
         return !strcmp(a->text,b->text) && a->length == b->length && (!a->length || equal(a->items[0],b->items[0],depth+1));
     case VMAP:
         if(a->length!=b->length)return 0;
-        for(size_t i=0;i<a->length;i++)if(key_compare(a->names[i],key_length(a,i),b->names[i],key_length(b,i)) || !equal(a->items[i],b->items[i],depth+1))return 0;
+        for(size_t i=0;i<a->length;i++)if(key_compare(a->members.names[i],key_length(a,i),b->members.names[i],key_length(b,i)) || !equal(a->items[i],b->items[i],depth+1))return 0;
         return 1;
-    case VARRAY: case VBUILDER:
+    case VARRAY: case VBUILDER: {
         if (a->length != b->length) return 0;
-        for (size_t i = 0; i < a->length; ++i) if (!equal(a->items[i],b->items[i],depth+1)) return 0;
+        ApxValue **left = a->kind == VBUILDER ? builder_items(a) : a->items;
+        ApxValue **right = b->kind == VBUILDER ? builder_items(b) : b->items;
+        for (size_t i = 0; i < a->length; ++i) if (!equal(left[i],right[i],depth+1)) return 0;
         return 1;
+    }
     }
     return 0;
 }
@@ -300,14 +337,14 @@ static size_t string_match(ApxValue *s,ApxValue *needle,size_t start){
 }
 static ApxValue *map_new(size_t n){
     size_check((int64_t)n,sizeof(ApxValue*));ApxValue *v=value(VMAP);v->length=n;
-    v->items=allocate(n*sizeof *v->items);v->names=allocate(n*sizeof *v->names);v->key_lengths=allocate(n*sizeof *v->key_lengths);return v;
+    v->items=allocate(n*sizeof *v->items);v->members.names=allocate(n*sizeof *v->members.names);v->key_lengths=allocate(n*sizeof *v->key_lengths);return v;
 }
 static size_t map_position(ApxValue *v,ApxValue *key,int *found){
     size_t lo=0,hi=v->length;
-    while(lo<hi){size_t mid=lo+(hi-lo)/2;if(key_compare(v->names[mid],key_length(v,mid),key->text,key->length)<0)lo=mid+1;else hi=mid;}
-    *found=lo<v->length&&!key_compare(v->names[lo],key_length(v,lo),key->text,key->length);return lo;
+    while(lo<hi){size_t mid=lo+(hi-lo)/2;if(key_compare(v->members.names[mid],key_length(v,mid),key->text,key->length)<0)lo=mid+1;else hi=mid;}
+    *found=lo<v->length&&!key_compare(v->members.names[lo],key_length(v,lo),key->text,key->length);return lo;
 }
-static void map_entry(ApxValue *dst,size_t d,ApxValue *src,size_t s){dst->names[d]=src->names[s];dst->key_lengths[d]=key_length(src,s);dst->items[d]=src->items[s];}
+static void map_entry(ApxValue *dst,size_t d,ApxValue *src,size_t s){dst->members.names[d]=src->members.names[s];dst->key_lengths[d]=key_length(src,s);dst->items[d]=src->items[s];}
 static ApxValue *parse_number(ApxValue *s,int floating){
     const char *err=floating?"invalid f64":"invalid i64";size_t i=0,digits=0;
     if(i<s->length&&s->text[i]=='-')i++;
@@ -353,17 +390,17 @@ static ApxValue *pure_builtin(int32_t op,ApxValue *a,ApxValue *b,ApxValue *c){
     if(op==43)return map_new(0);
     if(op>=44&&op<=49){
         require_kind(a,VMAP);
-        if(op==48||op==49){ApxValue *out=apx_array_new((int64_t)a->length);for(size_t i=0;i<a->length;i++)out->items[i]=op==48?apx_string(a->names[i],(int64_t)key_length(a,i)):a->items[i];return out;}
+        if(op==48||op==49){ApxValue *out=apx_array_new((int64_t)a->length);for(size_t i=0;i<a->length;i++)out->items[i]=op==48?apx_string(a->members.names[i],(int64_t)key_length(a,i)):a->items[i];return out;}
         require_kind(b,VSTR);int found=0;size_t pos=map_position(a,b,&found);
         if(op==44)return apx_variant(found?"some":"none",found?a->items[pos]:NULL);
         if(op==47)return apx_bool(found);
         if(op==46&&!found)return a;
         ApxValue *out=map_new(op==45?a->length+!found:a->length-1);size_t k=0;
         for(size_t i=0;i<a->length;i++){
-            if(i==pos){if(op==45){out->names[k]=b->text;out->key_lengths[k]=b->length;out->items[k++]=c;}if(found)continue;}
+            if(i==pos){if(op==45){out->members.names[k]=b->text;out->key_lengths[k]=b->length;out->items[k++]=c;}if(found)continue;}
             map_entry(out,k++,a,i);
         }
-        if(op==45&&pos==a->length){out->names[k]=b->text;out->key_lengths[k]=b->length;out->items[k]=c;}
+        if(op==45&&pos==a->length){out->members.names[k]=b->text;out->key_lengths[k]=b->length;out->items[k]=c;}
         return out;
     }
     if(op>=50&&op<=53){
@@ -437,13 +474,20 @@ ApxValue *apx_builtin(int32_t op, ApxValue *a, ApxValue *b) {
         if(!a || a->kind!=VBUILDER)fail("T101","type","type_mismatch","push expects builder");
         if(a->length>=a->capacity)fail("R301","runtime","builder_capacity_exceeded","builder capacity exceeded");
         size_check((int64_t)a->length+1,sizeof(ApxValue*));
-        ApxValue *out=value(VBUILDER);out->length=a->length+1;out->capacity=a->capacity;out->items=allocate(out->length*sizeof *out->items);
-        if(a->length)memcpy(out->items,a->items,a->length*sizeof *out->items);
-        out->items[a->length]=b;return out;
+        ApxValue *out=value(VBUILDER);out->length=a->length+1;out->capacity=a->capacity;
+        struct BuilderBlock *tail=a->members.builder_tail;
+        if(!tail || tail->used>=tail->capacity || a->length<tail->prefix_length ||
+            a->length-tail->prefix_length!=tail->used){
+            size_t remaining=a->capacity-a->length;
+            size_t capacity=remaining<APX_BUILDER_BLOCK_CAPACITY?remaining:APX_BUILDER_BLOCK_CAPACITY;
+            tail=allocate(sizeof *tail+capacity*sizeof *tail->items);
+            tail->previous=a->members.builder_tail;tail->prefix_length=a->length;tail->capacity=capacity;
+        }
+        tail->items[tail->used++]=b;out->members.builder_tail=tail;return out;
     }
     if(op==21) {
         if(!a || a->kind!=VBUILDER)fail("T101","type","type_mismatch","finish expects builder");
-        ApxValue *out=value(VARRAY);out->length=a->length;out->items=a->items;return out;
+        ApxValue *out=value(VARRAY);out->length=a->length;out->items=builder_items(a);return out;
     }
     if(op==22 || op==23) {
         if(!a || a->kind!=VBUILDER)fail("T101","type","type_mismatch",op==22?"count expects builder":"cap expects builder");
@@ -520,8 +564,8 @@ static ApxValue *parse_json(struct Parser *p){
             ApxValue *key=NULL;if(object){skip(p);key=parse_string(p);skip(p);if(p->p>=p->end||*p->p++!=':')invalid_json();}
             ApxValue *item=parse_json(p);
             if(out->length==allocated){size_t next=allocated?allocated*2:4;size_check((int64_t)next,sizeof(ApxValue*));ApxValue **items=allocate(next*sizeof *items);if(out->length)memcpy(items,out->items,out->length*sizeof *items);out->items=items;
-                if(object){const char **names=allocate(next*sizeof *names);if(out->length)memcpy(names,out->names,out->length*sizeof *names);out->names=names;size_t *lengths=allocate(next*sizeof *lengths);if(out->length)memcpy(lengths,out->key_lengths,out->length*sizeof *lengths);out->key_lengths=lengths;}allocated=next;}
-            if(object){if(find_key(out,key->text,key->length))fail("A104","abi_input","duplicate_field","duplicate JSON object field");out->names[out->length]=key->text;out->key_lengths[out->length]=key->length;}
+                if(object){const char **names=allocate(next*sizeof *names);if(out->length)memcpy(names,out->members.names,out->length*sizeof *names);out->members.names=names;size_t *lengths=allocate(next*sizeof *lengths);if(out->length)memcpy(lengths,out->key_lengths,out->length*sizeof *lengths);out->key_lengths=lengths;}allocated=next;}
+            if(object){if(find_key(out,key->text,key->length))fail("A104","abi_input","duplicate_field","duplicate JSON object field");out->members.names[out->length]=key->text;out->key_lengths[out->length]=key->length;}
             out->items[out->length++]=item;skip(p);if(p->p>=p->end)invalid_json();c=*p->p++;if(c==(object?'}':']'))break;if(c!=',')invalid_json();
         }
     } else if(p->end-p->p>=4&&!memcmp(p->p,"true",4)){p->p+=4;out=apx_bool(1);}
@@ -566,13 +610,13 @@ static ApxValue *validate_value(ApxValue *schema,ApxValue *input,unsigned depth)
         if(input->kind!=VRECORD)fail("A103","abi_input","type_mismatch","expected map object");
         ApxValue *inner=find_field(schema,"values");if(!inner)apx_trap("invalid map schema");
         ApxValue *out=map_new(input->length);struct MapEntry *entries=allocate(input->length*sizeof *entries);
-        for(size_t i=0;i<input->length;i++){entries[i].key=input->names[i];entries[i].length=key_length(input,i);entries[i].item=input->items[i];}
+        for(size_t i=0;i<input->length;i++){entries[i].key=input->members.names[i];entries[i].length=key_length(input,i);entries[i].item=input->items[i];}
         qsort(entries,input->length,sizeof *entries,entry_compare);
-        for(size_t i=0;i<input->length;i++){out->names[i]=entries[i].key;out->key_lengths[i]=entries[i].length;out->items[i]=validate_value(inner,entries[i].item,depth+1);}return out;
+        for(size_t i=0;i<input->length;i++){out->members.names[i]=entries[i].key;out->key_lengths[i]=entries[i].length;out->items[i]=validate_value(inner,entries[i].item,depth+1);}return out;
     }
     if(!strcmp(kind,"struct")){if(input->kind!=VRECORD)fail("A103","abi_input","type_mismatch","expected object");ApxValue *fields=find_field(schema,"fields");if(!fields||fields->kind!=VARRAY)fail("R999","runtime","trap","invalid struct schema");ApxValue *out=apx_record_new(schema_text(schema,"name"),(int64_t)fields->length);
-        for(size_t i=0;i<fields->length;i++){const char *name=schema_text(fields->items[i],"name");ApxValue *v=find_field(input,name);if(!v){char msg[256];snprintf(msg,sizeof msg,"missing field `%s`",name);fail("A101","abi_input","missing_field",msg);}out->names[i]=name;out->items[i]=validate_value(find_field(fields->items[i],"type"),v,depth+1);}
-        const char *extra=NULL;for(size_t i=0;i<input->length;i++)if(!find_key(out,input->names[i],key_length(input,i))&&(!extra||strcmp(input->names[i],extra)<0))extra=input->names[i];
+        for(size_t i=0;i<fields->length;i++){const char *name=schema_text(fields->items[i],"name");ApxValue *v=find_field(input,name);if(!v){char msg[256];snprintf(msg,sizeof msg,"missing field `%s`",name);fail("A101","abi_input","missing_field",msg);}out->members.names[i]=name;out->items[i]=validate_value(find_field(fields->items[i],"type"),v,depth+1);}
+        const char *extra=NULL;for(size_t i=0;i<input->length;i++)if(!find_key(out,input->members.names[i],key_length(input,i))&&(!extra||strcmp(input->members.names[i],extra)<0))extra=input->members.names[i];
         if(extra){char msg[256];snprintf(msg,sizeof msg,"extra field `%s`",extra);fail("A102","abi_input","extra_field",msg);}return out;
     }
     fail("A103","abi_input","type_mismatch","unsupported ABI input type for MVP");return NULL;
@@ -609,9 +653,9 @@ static void encode(struct Output *o,ApxValue *v,unsigned depth){
         break;
     case VSTR:quoted(o,v->text,v->length);break;
     case VARRAY:literal(o,"[");for(size_t i=0;i<v->length;i++){if(i)literal(o,",");encode(o,v->items[i],depth+1);}literal(o,"]");break;
-    case VRECORD:{literal(o,"{");size_t *order=allocate(v->length*sizeof *order);for(size_t i=0;i<v->length;i++)order[i]=i;for(size_t i=1;i<v->length;i++){size_t k=order[i],j=i;while(j&&key_compare(v->names[order[j-1]],key_length(v,order[j-1]),v->names[k],key_length(v,k))>0){order[j]=order[j-1];j--;}order[j]=k;}
-        for(size_t i=0;i<v->length;i++){size_t k=order[i];if(i)literal(o,",");quoted(o,v->names[k],key_length(v,k));literal(o,":");encode(o,v->items[k],depth+1);}literal(o,"}");break;}
-    case VMAP:literal(o,"{");for(size_t i=0;i<v->length;i++){if(i)literal(o,",");quoted(o,v->names[i],key_length(v,i));literal(o,":");encode(o,v->items[i],depth+1);}literal(o,"}");break;
+    case VRECORD:{literal(o,"{");size_t *order=allocate(v->length*sizeof *order);for(size_t i=0;i<v->length;i++)order[i]=i;for(size_t i=1;i<v->length;i++){size_t k=order[i],j=i;while(j&&key_compare(v->members.names[order[j-1]],key_length(v,order[j-1]),v->members.names[k],key_length(v,k))>0){order[j]=order[j-1];j--;}order[j]=k;}
+        for(size_t i=0;i<v->length;i++){size_t k=order[i];if(i)literal(o,",");quoted(o,v->members.names[k],key_length(v,k));literal(o,":");encode(o,v->items[k],depth+1);}literal(o,"}");break;}
+    case VMAP:literal(o,"{");for(size_t i=0;i<v->length;i++){if(i)literal(o,",");quoted(o,v->members.names[i],key_length(v,i));literal(o,":");encode(o,v->items[i],depth+1);}literal(o,"}");break;
     case VVARIANT:literal(o,"{\"tag\":");quoted(o,v->text,strlen(v->text));if(v->length){literal(o,!strcmp(v->text,"err")?",\"error\":":",\"value\":");encode(o,v->items[0],depth+1);}literal(o,"}");break;
     case VBUILDER:fail("T101","type","type_mismatch","builder cannot cross output ABI");break;
     }
@@ -647,7 +691,7 @@ int apx_json_unsigned(ApxValue *v,uint64_t *out){
         if(!errno&&!*end){*out=(uint64_t)n;return 1;}
     }return 0;
 }
-const char *apx_json_key(ApxValue *v,size_t i){return v&&v->kind==VRECORD&&i<v->length?v->names[i]:NULL;}
+const char *apx_json_key(ApxValue *v,size_t i){return v&&v->kind==VRECORD&&i<v->length?v->members.names[i]:NULL;}
 void apx_json_reset(void){reset_memory();}
 
 static ApxValue *host_error(const char *message){return apx_variant("err",apx_string(message,(int64_t)strlen(message)));}
