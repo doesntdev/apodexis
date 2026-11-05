@@ -9,6 +9,13 @@ numeric helpers, nested records, builder accumulation, repeated finishes,
 agent-style row differences and static response generation. It compares runtime
 representations while holding the generated QBE program constant.
 
+## Published observations
+
+See [local results and limitations](../../docs/benchmarks.md) and the
+[sanitized before/after observations](results.json). Run
+`python3 benchmarks/runtime_memory/test_results.py` to reaggregate those timing
+and memory facts offline. This does not replace full local artifact qualification.
+
 ## Requirements
 
 - The normal native source toolchain: C99 compiler, bundled QBE, assembler/linker

@@ -12,6 +12,7 @@ For authoring, read the [language specification entry point](specification.md).
 | [MCP client setup](mcp-client-setup.md) | Local stdio configuration, discovery, timeouts and troubleshooting. |
 | [Host capabilities](capabilities.md) | Operator grants and a two-module file-report walkthrough. |
 | [Binary distribution](binary-distribution.md) | Relocatable installed toolchain requirements and use. |
+| [Local benchmarks](benchmarks.md) | Cross-language timings, separate runtime improvements, source, ranges and limitations. |
 
 ## Implemented references
 

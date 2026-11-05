@@ -119,6 +119,36 @@ h3 { font-size: 1.06rem; font-weight: 650; letter-spacing: -0.02em; line-height:
 .boundary-note p + p { margin-top: 0.8rem; }
 .boundary-note .text-link { margin-top: 0.6rem; font-size: 0.8rem; }
 
+/* Comparable measurements: all cases visible, native disclosure controls. */
+.benchmark-intro { margin-block: 2rem; max-width: 78ch; color: var(--muted); font-size: 1rem; }
+.benchmark-intro p + p { margin-top: 1rem; }
+.benchmark-note { margin-block: 0.8rem 1.2rem; max-width: 86ch; color: var(--muted); font-size: 1rem; line-height: 1.8; }
+.benchmark-scroll { overflow-x: auto; margin-block: 1.25rem 1.75rem; border: 1px solid var(--line); border-radius: 9px; background: var(--code); overscroll-behavior-x: contain; scrollbar-color: var(--line) var(--code); }
+.benchmark-scroll:focus-visible, .benchmark-detail summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.benchmark-table { width: 100%; min-width: 760px; border-collapse: collapse; font-family: var(--mono); font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+.benchmark-table caption { padding: 1rem 1.25rem; text-align: left; color: var(--muted); font-family: var(--sans); font-size: 0.9rem; border-bottom: 1px solid var(--line); }
+.benchmark-table th, .benchmark-table td { padding: 0.8rem 1rem; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--line); }
+.benchmark-table th { font-weight: 550; }
+.benchmark-table tr:last-child > * { border-bottom: 0; }
+.benchmark-table th:first-child { text-align: left; }
+.benchmark-table thead { background: var(--surface); color: #c1cee1; }
+.benchmark-table tbody th { color: #c1cee1; }
+.benchmark-table .apx-column { color: var(--accent); background: #78e7dc06; }
+.benchmark-detail { padding-block: 1.25rem; border-top: 1px solid var(--line); }
+.benchmark-detail summary { padding-block: 0.3rem; min-height: 44px; cursor: pointer; font-size: 1rem; font-weight: 600; }
+.benchmark-detail summary:hover { color: var(--accent); }
+.benchmark-contract { margin-block: 1.5rem 2rem; }
+.benchmark-contract p { max-width: 86ch; margin-top: 0.8rem; color: var(--muted); font-size: 1rem; line-height: 1.8; }
+.benchmark-links { display: flex; flex-wrap: wrap; gap: 0.5rem 2rem; margin-top: 1rem; }
+.benchmark-links a { display: inline-flex; align-items: center; min-height: 44px; color: var(--accent); font-size: 0.94rem; }
+.benchmark-links a:visited { color: var(--blue); }
+.runtime-table { min-width: 460px; }
+@media (max-width: 800px) {
+  .benchmark-table { table-layout: fixed; }
+  .benchmark-table th:first-child { width: 160px; white-space: normal; position: sticky; left: 0; z-index: 1; background: var(--code); }
+  .benchmark-table thead th:first-child { background: var(--surface); }
+}
+
 /* Roadmap is visibly separate, without implying shipped functionality. */
 .future-section { border-block: 1px solid #2a3c55; background: linear-gradient(115deg, #101f31, #101a2c 58%, #13233a); padding-block: 72px; }
 .future-layout { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(3rem, 8vw, 8rem); }

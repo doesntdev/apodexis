@@ -10,7 +10,7 @@
   <meta property="og:description" content="Checked native programs. Explicit execution limits. Structured validation and repair over MCP. An experimental, MIT-licensed language.">
   <title>Apodexis — A compiled language for agent-written tools</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg?v=tech-1">
-  <link rel="stylesheet" href="site.css?v=tech-1">
+  <link rel="stylesheet" href="site.css?v=bench-1">
 </head>
 <body id="top">
   <a class="skip-link" href="#main">Skip to content</a>
@@ -27,7 +27,7 @@
       <a href="#why">Why</a>
       <a href="#example">Example</a>
       <a href="#capabilities">Today</a>
-      <a href="#future">Next</a>
+      <a href="#benchmarks">Benchmarks</a>
       <a href="#get-started">Get started</a>
     </nav>
     <a class="header-source" href="https://github.com/doesntdev/apodexis">GitHub <span aria-hidden="true">↗</span></a>
@@ -140,10 +140,104 @@
       </aside>
     </section>
 
+    <section class="section wrap benchmarks" id="benchmarks" aria-labelledby="benchmarks-title">
+      <div class="section-heading heading-with-link">
+        <div><p class="eyebrow section-index">03 / Local measurements</p><h2 id="benchmarks-title">Local benchmark results.</h2></div>
+        <a class="text-link" href="https://github.com/doesntdev/apodexis/blob/main/docs/benchmarks.md">Methodology &amp; full ranges <span aria-hidden="true">↗</span></a>
+      </div>
+      <div class="benchmark-intro">
+        <p>Nine workloads, five implementations, nine rotated rounds. Author-produced on one Linux x86-64 machine with an AMD Ryzen 9 7900X. These are implementation measurements, not a universal language ranking.</p>
+        <p>Apodexis has lower one-shot latency than Python or Node here, but that does not mean faster computation: C, Rust and warmed-up JavaScript lead the non-control kernels, and Python also wins several workloads.</p>
+      </div>
+      <h3>Steady-state JSON work</h3>
+      <p class="benchmark-note">Fresh JSON parse, computation, complete encoding, full-result verification and cleanup. After 1,000 untimed warmup calls; compilation, imports, process startup, broker and sandbox setup excluded.</p>
+        <div class="benchmark-scroll" tabindex="0" role="region" aria-label="In-process JSON pipeline · µs / invocation; horizontally scrollable">
+          <table class="benchmark-table" id="benchmark-pipeline">
+            <caption>In-process JSON pipeline · µs / invocation · median · lower is better</caption>
+            <thead><tr><th scope="col">Workload</th><th scope="col" class="apx-column">Apodexis</th><th scope="col">C</th><th scope="col">Rust</th><th scope="col">Python</th><th scope="col">JavaScript</th></tr></thead>
+            <tbody>
+              <tr data-case="scalar"><th scope="row">Scalar control</th><td class="apx-column">2.27</td><td>2.16</td><td>2.05</td><td>4.78</td><td>2.31</td></tr>
+              <tr data-case="numeric-256"><th scope="row">Numeric loop · 256</th><td class="apx-column">16.00</td><td>2.27</td><td>2.20</td><td>11.76</td><td>2.63</td></tr>
+              <tr data-case="numeric-2048"><th scope="row">Numeric loop · 2,048</th><td class="apx-column">122.91</td><td>3.04</td><td>2.67</td><td>74.83</td><td>3.48</td></tr>
+              <tr data-case="each-128"><th scope="row">Array sum · 128</th><td class="apx-column">7.38</td><td>5.27</td><td>3.94</td><td>15.47</td><td>4.16</td></tr>
+              <tr data-case="each-4096"><th scope="row">Array sum · 4,096</th><td class="apx-column">180.65</td><td>115.92</td><td>62.65</td><td>366.96</td><td>54.96</td></tr>
+              <tr data-case="builder-256"><th scope="row">Build array · 256</th><td class="apx-column">16.73</td><td>9.97</td><td>4.20</td><td>13.69</td><td>4.61</td></tr>
+              <tr data-case="builder-4096"><th scope="row">Build array · 4,096</th><td class="apx-column">258.92</td><td>139.06</td><td>56.30</td><td>168.84</td><td>45.74</td></tr>
+              <tr data-case="rowdiff-32"><th scope="row">Record diff · 32</th><td class="apx-column">133.58</td><td>15.58</td><td>23.37</td><td>83.30</td><td>22.38</td></tr>
+              <tr data-case="rowdiff-64"><th scope="row">Record diff · 64</th><td class="apx-column">498.24</td><td>42.98</td><td>59.94</td><td>255.46</td><td>39.02</td></tr>
+            </tbody>
+          </table>
+        </div>
+      <details class="benchmark-detail">
+        <summary>Core execution</summary>
+        <p class="benchmark-note">Function work and output allocation only. Apodexis retains generated input validation and fuel inside this timer; baseline typed conversion is outside. Clock overhead dominates the scalar control. No timing overhead is subtracted.</p>
+        <div class="benchmark-scroll" tabindex="0" role="region" aria-label="Instrumented core · µs / invocation; horizontally scrollable">
+          <table class="benchmark-table" id="benchmark-core">
+            <caption>Instrumented core · µs / invocation · median · lower is better</caption>
+            <thead><tr><th scope="col">Workload</th><th scope="col" class="apx-column">Apodexis</th><th scope="col">C</th><th scope="col">Rust</th><th scope="col">Python</th><th scope="col">JavaScript</th></tr></thead>
+            <tbody>
+              <tr data-case="scalar"><th scope="row">Scalar control</th><td class="apx-column">1.13</td><td>1.04</td><td>1.00</td><td>1.14</td><td>1.08</td></tr>
+              <tr data-case="numeric-256"><th scope="row">Numeric loop · 256</th><td class="apx-column">13.40</td><td>1.14</td><td>1.11</td><td>8.01</td><td>1.35</td></tr>
+              <tr data-case="numeric-2048"><th scope="row">Numeric loop · 2,048</th><td class="apx-column">111.23</td><td>1.92</td><td>1.58</td><td>70.93</td><td>2.20</td></tr>
+              <tr data-case="each-128"><th scope="row">Array sum · 128</th><td class="apx-column">3.13</td><td>1.05</td><td>1.07</td><td>2.36</td><td>1.46</td></tr>
+              <tr data-case="each-4096"><th scope="row">Array sum · 4,096</th><td class="apx-column">66.65</td><td>1.85</td><td>2.59</td><td>44.90</td><td>2.87</td></tr>
+              <tr data-case="builder-256"><th scope="row">Build array · 256</th><td class="apx-column">7.38</td><td>1.10</td><td>1.17</td><td>4.87</td><td>2.18</td></tr>
+              <tr data-case="builder-4096"><th scope="row">Build array · 4,096</th><td class="apx-column">115.13</td><td>1.45</td><td>2.69</td><td>72.54</td><td>10.99</td></tr>
+              <tr data-case="rowdiff-32"><th scope="row">Record diff · 32</th><td class="apx-column">121.05</td><td>6.02</td><td>5.81</td><td>58.33</td><td>7.84</td></tr>
+              <tr data-case="rowdiff-64"><th scope="row">Record diff · 64</th><td class="apx-column">462.23</td><td>24.95</td><td>23.22</td><td>207.54</td><td>16.93</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
+      <details class="benchmark-detail">
+        <summary>One-shot tool invocation</summary>
+        <p class="benchmark-note">Parent-observed spawn, stdin/stdout and exit, including imports. Apodexis uses its standard restricted ELF and result envelope; baselines do not emulate either. No compilation is included. OS file caches are warm.</p>
+        <div class="benchmark-scroll" tabindex="0" role="region" aria-label="One-shot tool invocation · ms / process; horizontally scrollable">
+          <table class="benchmark-table" id="benchmark-oneshot">
+            <caption>One-shot tool invocation · ms / process · median · lower is better</caption>
+            <thead><tr><th scope="col">Workload</th><th scope="col" class="apx-column">Apodexis</th><th scope="col">C</th><th scope="col">Rust</th><th scope="col">Python</th><th scope="col">JavaScript</th></tr></thead>
+            <tbody>
+              <tr data-case="scalar"><th scope="row">Scalar control</th><td class="apx-column">1.92</td><td>1.09</td><td>1.22</td><td>15.84</td><td>19.23</td></tr>
+              <tr data-case="numeric-256"><th scope="row">Numeric loop · 256</th><td class="apx-column">1.84</td><td>1.10</td><td>1.22</td><td>15.89</td><td>19.78</td></tr>
+              <tr data-case="numeric-2048"><th scope="row">Numeric loop · 2,048</th><td class="apx-column">2.33</td><td>1.30</td><td>1.23</td><td>16.44</td><td>19.38</td></tr>
+              <tr data-case="each-128"><th scope="row">Array sum · 128</th><td class="apx-column">1.71</td><td>1.10</td><td>1.20</td><td>16.09</td><td>19.91</td></tr>
+              <tr data-case="each-4096"><th scope="row">Array sum · 4,096</th><td class="apx-column">2.33</td><td>1.33</td><td>1.34</td><td>16.42</td><td>19.73</td></tr>
+              <tr data-case="builder-256"><th scope="row">Build array · 256</th><td class="apx-column">2.02</td><td>1.11</td><td>1.23</td><td>15.81</td><td>19.43</td></tr>
+              <tr data-case="builder-4096"><th scope="row">Build array · 4,096</th><td class="apx-column">2.64</td><td>1.61</td><td>1.39</td><td>16.74</td><td>19.75</td></tr>
+              <tr data-case="rowdiff-32"><th scope="row">Record diff · 32</th><td class="apx-column">2.18</td><td>1.10</td><td>1.49</td><td>16.11</td><td>20.46</td></tr>
+              <tr data-case="rowdiff-64"><th scope="row">Record diff · 64</th><td class="apx-column">3.00</td><td>1.16</td><td>1.30</td><td>16.52</td><td>21.68</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
+      <aside class="benchmark-contract">
+        <h3>Same valid-input work. Different guarantees.</h3>
+        <p>Record differences retain the same scan algorithm; collection results are checked in full. Apodexis keeps checked arithmetic, fuel and immutable snapshots. Baselines use ordinary owned collections and do not emulate its memory quota, capabilities or snapshot contract. JSON libraries and representations differ; these timings do not isolate the cost of any one safety feature.</p>
+        <p>Toolchains: GCC 15.2 (<code>-O3</code> for C), QBE 1.3 with the default <code>-O2</code> C runtime, Rust 1.95 release with overflow checks, Python 3.14.9, Node 24.15.0. One logical CPU, unchanged powersave governor, normal GC. All selected cases and rounds are retained; the small corpus is not independently reproduced.</p>
+      </aside>
+      <details class="benchmark-detail">
+        <summary>Previous Apodexis runtime vs current runtime</summary>
+        <p class="benchmark-note">A separate before/after study of bounded arenas and snapshot-safe append-only builders. The example below constructs 4,096 elements; it is not a comparison against another language and does not use the cross-language harness.</p>
+        <div class="benchmark-scroll" tabindex="0" role="region" aria-label="Historical runtime improvements">
+          <table class="benchmark-table runtime-table" id="benchmark-runtime">
+            <caption>4,096 appends · previous runtime → arena + builder runtime</caption>
+            <thead><tr><th scope="col">Metric</th><th scope="col">Before</th><th scope="col">After</th></tr></thead>
+            <tbody><tr><th scope="row">In-process pipeline</th><td>5.112 ms</td><td>0.251 ms</td></tr><tr><th scope="row">Requested allocation</th><td>65.20 MiB</td><td>1.25 MiB</td></tr><tr><th scope="row">Isolated peak RSS</th><td>67.55 MiB</td><td>3.37 MiB</td></tr></tbody>
+          </table>
+        </div>
+        <p class="benchmark-note">All 22 workloads passed the frozen controls against the original runtime. Requested allocation is cumulative payload work, not physical RAM. RSS is a separate process-level observation per version. Repeatedly finishing every prefix still incurs materialization work and showed a small regression against arena-only. These are workload-specific gains, not a general “20× faster” claim.</p>
+      </details>
+      <div class="benchmark-links">
+        <a href="https://github.com/doesntdev/apodexis/tree/main/benchmarks/cross_language">Source &amp; reproduction</a>
+        <a href="https://github.com/doesntdev/apodexis/blob/main/benchmarks/cross_language/results.json">All cross-language samples</a>
+        <a href="https://github.com/doesntdev/apodexis/blob/main/benchmarks/runtime_memory/results.json">Before/after receipts</a>
+      </div>
+    </section>
+
     <section class="future-section" id="future" aria-labelledby="future-title">
       <div class="wrap future-layout">
         <div>
-          <p class="eyebrow section-index">03 / Future directions</p>
+          <p class="eyebrow section-index">04 / Future directions</p>
           <h2 id="future-title">Broader targets.<br>Simpler delivery.</h2>
           <p class="future-intro">Goals, not current capabilities. These directions have no promised release dates or compatibility guarantees.</p>
         </div>
@@ -157,7 +251,7 @@
     <section class="section wrap getting-started" id="get-started" aria-labelledby="start-title">
       <div class="start-layout">
         <div>
-          <p class="eyebrow section-index">04 / Build &amp; contribute</p>
+          <p class="eyebrow section-index">05 / Build &amp; contribute</p>
           <h2 id="start-title">Start with the source.</h2>
           <p class="section-intro">Build locally on Linux x86-64 with glibc. You’ll need a C99 compiler, GNU Make, the platform <code>as</code>/<code>ld</code>, and C library development files. QBE is vendored; the source build fetches no compiler dependencies.</p>
           <a class="text-link" href="https://github.com/doesntdev/apodexis#initial-setup">Full setup and first-run instructions <span aria-hidden="true">↗</span></a>

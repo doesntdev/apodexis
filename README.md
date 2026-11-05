@@ -10,7 +10,7 @@ input under explicit limits. Humans can use the same compiler from the command l
 **Start here:** [Project website](https://doesntdev.github.io/apodexis/) ·
 [Language specification](docs/specification.md) ·
 [Initial setup](#initial-setup) · [Examples](#examples) ·
-[Agent integration](#agent-integration-with-mcp) ·
+[Agent integration](#agent-integration-with-mcp) · [Local benchmarks](docs/benchmarks.md) ·
 [Contributing](CONTRIBUTING.md) · [MIT license](LICENSE)
 
 ## Status
