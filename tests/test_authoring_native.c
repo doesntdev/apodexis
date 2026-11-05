@@ -37,4 +37,78 @@ static void push(const char *directory){
     same("M eager\nF value->i64\n  Z \"payload-before-capacity\"\nF main->[i64]\n  L out (buf i64 0)\n  P out (value)\n  R (finish out)\n","M eager\nF value->i64\n  Z \"payload-before-capacity\"\nF main->[i64]\n  L out (buf i64 0)\n  S out (push out (value))\n  R (finish out)\n","null","1000000","trap",0,directory);
     same("M variants\nF main->[option i64]\n  L out (buf option i64 2)\n  P out (some 7)\n  P out (none)\n  R (finish out)\n","M variants\nF main->[option i64]\n  L out (buf option i64 2)\n  S out (push out (some 7))\n  S out (push out (none))\n  R (finish out)\n","null","1000000","[{\"tag\":\"some\",\"value\":7},{\"tag\":\"none\"}]",1,directory);
 }
-int main(void){char directory[]=".build/authoring-native-XXXXXX";require(mkdtemp(directory)!=NULL,"native scratch directory");postfix(directory);push(directory);char path[4096];const char *files[]={"source.apx","input.json","output"};for(size_t i=0;i<3;i++){snprintf(path,sizeof path,"%s/%s",directory,files[i]);unlink(path);}require(!rmdir(directory),"native fixture cleanup");printf("native authoring steps 1-2: %u checks; postfix/P output/fuel/alias/evaluation-order/bounds parity PASS\n",checks);return 0;}
+static void builder_snapshots(const char *directory){
+    const char *short_source=
+        "M snapshots\nF main->[[i64]]\n"
+        "  L prefix (buf i64 5)\n  P prefix 10\n  P prefix 20\n"
+        "  L left prefix\n  L right prefix\n"
+        "  L before (finish prefix)\n  L again (finish prefix)\n"
+        "  P left 30\n  P right 40\n  P left 31\n"
+        "  L left_before (finish left)\n  P left 32\n  P prefix 50\n"
+        "  A (= (count prefix) 3)\n  A (= (count left) 5)\n"
+        "  A (= (count right) 3)\n  A (= (cap left) 5)\n"
+        "  R [before again (finish prefix) left_before (finish left) (finish right)]\n";
+    const char *prefix=
+        "M snapshots\nF main->[[i64]]\n"
+        "  L prefix (buf i64 5)\n  S prefix (push prefix 10)\n  S prefix (push prefix 20)\n"
+        "  L left prefix\n  L right prefix\n"
+        "  L before (finish prefix)\n  L again (finish prefix)\n"
+        "  S left (push left 30)\n  S right (push right 40)\n  S left (push left 31)\n"
+        "  L left_before (finish left)\n  S left (push left 32)\n  S prefix (push prefix 50)\n"
+        "  A (= (count prefix) 3)\n  A (= (count left) 5)\n"
+        "  A (= (count right) 3)\n  A (= (cap left) 5)\n"
+        "  R [before again (finish prefix) left_before (finish left) (finish right)]\n";
+    /* Both branches share a nonempty prefix; finishes must not consume or mutate it. */
+    same(short_source,prefix,"null","1000000","[[10,20],[10,20],[10,20,50],[10,20,30,31],[10,20,30,31,32],[10,20,40]]",1,directory);
+    same(short_source,prefix,"null","8","fuel_exhausted",0,directory);
+    same(short_source,prefix,"null","16","fuel_exhausted",0,directory);
+}
+static void builder_bounds(const char *directory){
+    const char *short_source=
+        "M bounds\nF main capacity:i64->[[i64]]\n"
+        "  L out (buf i64 capacity)\n  A (= (count out) 0)\n  A (= (cap out) capacity)\n"
+        "  L empty (finish out)\n  ? (= capacity 0)\n    R [empty (finish out)]\n"
+        "  P out 7\n  A (= (count out) 1)\n  A (= (cap out) capacity)\n"
+        "  P out 8\n  A (= (count out) 2)\n  A (= (cap out) capacity)\n"
+        "  R [empty (finish out)]\n";
+    const char *prefix=
+        "M bounds\nF main capacity:i64->[[i64]]\n"
+        "  L out (buf i64 capacity)\n  A (= (count out) 0)\n  A (= (cap out) capacity)\n"
+        "  L empty (finish out)\n  ? (= capacity 0)\n    R [empty (finish out)]\n"
+        "  S out (push out 7)\n  A (= (count out) 1)\n  A (= (cap out) capacity)\n"
+        "  S out (push out 8)\n  A (= (count out) 2)\n  A (= (cap out) capacity)\n"
+        "  R [empty (finish out)]\n";
+    same(short_source,prefix,"0","1000000","[[],[]]",1,directory);
+    same(short_source,prefix,"2","1000000","[[],[7,8]]",1,directory);
+    same(short_source,prefix,"1","1000000","builder_capacity_exceeded",0,directory);
+    same(short_source,prefix,"-1","1000000","builder_capacity_exceeded",0,directory);
+    /* Declared capacity is metadata, not an eager allocation request. */
+    same(short_source,prefix,"9223372036854775807","1000000","[[],[7,8]]",1,directory);
+}
+static void builder_nested(const char *directory){
+    const char *short_source=
+        "M nested\nT Row struct\n  label:str\n  cells:[[i64]]\n  choice:option [str]\n"
+        "F main->[[result Row str]]\n"
+        "  L inner (buf [i64] 2)\n  P inner [1 2]\n  L first (finish inner)\n  P inner []\n"
+        "  L rows (buf result Row str 3)\n"
+        "  P rows (ok (Row label=\"é🙂\" cells=first choice=(some [\"kept\" \"\"])))\n"
+        "  L saved (finish rows)\n  P rows (err \"later\")\n"
+        "  P rows (ok (Row label=\"\" cells=(finish inner) choice=(none)))\n"
+        "  R [saved (finish rows)]\n";
+    const char *prefix=
+        "M nested\nT Row struct\n  label:str\n  cells:[[i64]]\n  choice:option [str]\n"
+        "F main->[[result Row str]]\n"
+        "  L inner (buf [i64] 2)\n  S inner (push inner [1 2])\n  L first (finish inner)\n  S inner (push inner [])\n"
+        "  L rows (buf result Row str 3)\n"
+        "  S rows (push rows (ok (Row label=\"é🙂\" cells=first choice=(some [\"kept\" \"\"]))))\n"
+        "  L saved (finish rows)\n  S rows (push rows (err \"later\"))\n"
+        "  S rows (push rows (ok (Row label=\"\" cells=(finish inner) choice=(none))))\n"
+        "  R [saved (finish rows)]\n";
+    const char *expected=
+        "[[{\"tag\":\"ok\",\"value\":{\"label\":\"é🙂\",\"cells\":[[1,2]],\"choice\":{\"tag\":\"some\",\"value\":[\"kept\",\"\"]}}}],"
+        "[{\"tag\":\"ok\",\"value\":{\"label\":\"é🙂\",\"cells\":[[1,2]],\"choice\":{\"tag\":\"some\",\"value\":[\"kept\",\"\"]}}},"
+        "{\"tag\":\"err\",\"error\":\"later\"},"
+        "{\"tag\":\"ok\",\"value\":{\"label\":\"\",\"cells\":[[1,2],[]],\"choice\":{\"tag\":\"none\"}}}]]";
+    same(short_source,prefix,"null","1000000",expected,1,directory);
+}
+int main(void){char directory[]=".build/authoring-native-XXXXXX";require(mkdtemp(directory)!=NULL,"native scratch directory");postfix(directory);push(directory);builder_snapshots(directory);builder_bounds(directory);builder_nested(directory);char path[4096];const char *files[]={"source.apx","input.json","output"};for(size_t i=0;i<3;i++){snprintf(path,sizeof path,"%s/%s",directory,files[i]);unlink(path);}require(!rmdir(directory),"native fixture cleanup");printf("native authoring steps 1-2: %u checks; postfix/P output/fuel/snapshot/nesting/evaluation-order/bounds parity PASS\n",checks);return 0;}

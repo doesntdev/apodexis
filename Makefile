@@ -8,7 +8,7 @@ FRONTEND := compiler/apx_frontend.c compiler/apx_qbe.c compiler/apx_metadata.c c
 DRIVER_HELPERS := compiler/apx_modules.c compiler/apx_host.c
 HEADERS := compiler/apx_frontend.h compiler/apx_qbe.h compiler/apx_hash.h compiler/apx_unicode.h runtime/apx_runtime.h
 
-.PHONY: all toolchain test test-support test-sanitize smoke check clean dist
+.PHONY: all toolchain test test-support test-memory test-sanitize smoke check clean dist
 all: toolchain $(BUILD)/apx_runtime.o $(BUILD)/apx_start.o bin/apodexis bin/apx-mcp
 
 $(QBE):
@@ -43,6 +43,13 @@ $(BUILD)/test-support: tests/test_support.c compiler/apx_hash.c compiler/apx_has
 
 test-support: $(BUILD)/test-support
 	$(BUILD)/test-support
+
+$(BUILD)/test-runtime-memory: tests/test_runtime_memory.c runtime/apx_runtime.c runtime/apx_runtime.h
+	mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) tests/test_runtime_memory.c -o $@
+
+test-memory: $(BUILD)/test-runtime-memory
+	$(BUILD)/test-runtime-memory
 
 check:
 	$(CC) $(CFLAGS) -Icompiler -fsyntax-only compiler/apx_driver.c $(FRONTEND) $(DRIVER_HELPERS)
@@ -98,6 +105,10 @@ $(BUILD)/test-reference-programs: tests/test_reference_programs.c $(BUILD)/apx_j
 	$(CC) $(CFLAGS) tests/test_reference_programs.c $(BUILD)/apx_json.o -o $@
 
 test-sanitize: all
+	$(CC) $(CFLAGS) -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined tests/test_runtime_memory.c -o $(BUILD)/test-runtime-memory-sanitized
+	ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 UBSAN_OPTIONS=halt_on_error=1 $(BUILD)/test-runtime-memory-sanitized
+	$(CC) $(CFLAGS) -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined -DAPX_LIBRARY_ONLY tests/test_support.c compiler/apx_hash.c runtime/apx_runtime.c -o $(BUILD)/test-support-sanitized
+	ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 UBSAN_OPTIONS=halt_on_error=1 $(BUILD)/test-support-sanitized
 	$(CC) $(CFLAGS) -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined -DAPX_LIBRARY_ONLY -Icompiler tests/test_fuzz.c $(FRONTEND) runtime/apx_runtime.c -o $(BUILD)/test-fuzz-sanitized
 	ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 UBSAN_OPTIONS=halt_on_error=1 $(BUILD)/test-fuzz-sanitized
 	$(CC) $(CFLAGS) -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined -DAPX_LIBRARY_ONLY -Icompiler tests/test_diagnostics.c $(FRONTEND) runtime/apx_runtime.c -o $(BUILD)/test-diagnostics-sanitized
@@ -111,7 +122,7 @@ test-sanitize: all
 	$(CC) $(CFLAGS) -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined -DAPX_LIBRARY_ONLY -Icompiler tests/test_pure_libraries.c $(FRONTEND) runtime/apx_runtime.c -o $(BUILD)/test-pure-libraries-sanitized
 	ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 UBSAN_OPTIONS=halt_on_error=1 $(BUILD)/test-pure-libraries-sanitized
 
-test: all test-support $(BUILD)/test-conformance $(BUILD)/test-mcp $(BUILD)/test-regressions $(BUILD)/test-sandbox $(BUILD)/test-unicode $(BUILD)/test-frontend $(BUILD)/test-diagnostics $(BUILD)/test-diagnostic-transport $(BUILD)/test-authoring-syntax $(BUILD)/test-authoring-native $(BUILD)/test-reference-programs $(BUILD)/test-authoring-mcp $(BUILD)/test-pure-libraries $(BUILD)/test-modules $(BUILD)/test-host $(BUILD)/test-application-foundation
+test: all test-support test-memory $(BUILD)/test-conformance $(BUILD)/test-mcp $(BUILD)/test-regressions $(BUILD)/test-sandbox $(BUILD)/test-unicode $(BUILD)/test-frontend $(BUILD)/test-diagnostics $(BUILD)/test-diagnostic-transport $(BUILD)/test-authoring-syntax $(BUILD)/test-authoring-native $(BUILD)/test-reference-programs $(BUILD)/test-authoring-mcp $(BUILD)/test-pure-libraries $(BUILD)/test-modules $(BUILD)/test-host $(BUILD)/test-application-foundation
 	$(BUILD)/test-pure-libraries
 	$(BUILD)/test-modules
 	$(BUILD)/test-host

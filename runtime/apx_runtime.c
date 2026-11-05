@@ -33,6 +33,23 @@
 #define VALUE_TYPE_DEPTH 64
 #define GENERATED_SCHEMA_DEPTH (4u * VALUE_TYPE_DEPTH + 16u)
 
+/* Bounded C99 regions, not sparse virtual-address reservations. Payload quota
+ * retains its original meaning; backing additionally counts headers and slack. */
+#define APX_RUNTIME_ARENA 1
+#define APX_ARENA_INITIAL 512u
+#define APX_ARENA_CHUNK_MAX (1024u - sizeof(struct ArenaChunk))
+#define APX_ARENA_BACKING (2u * APX_MEMORY)
+#if defined(__SANITIZE_ADDRESS__)
+#define APX_ARENA_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define APX_ARENA_ASAN 1
+#endif
+#endif
+#ifdef APX_ARENA_ASAN
+#include <sanitizer/asan_interface.h>
+#endif
+
 enum Kind { VNULL, VBOOL, VINT, VFLOAT, VSTR, VARRAY, VRECORD, VVARIANT, VBUILDER, VMAP };
 struct ApxValue {
     enum Kind kind;
@@ -44,8 +61,17 @@ struct ApxValue {
     const char **names;
     size_t *key_lengths; /* Raw JSON objects and typed maps retain embedded NUL. */
 };
-struct Allocation { struct Allocation *next; };
-static struct Allocation *allocations;
+union ArenaAlignment { long double real; int64_t integer; void *pointer; };
+struct ArenaAlignmentProbe { char byte; union ArenaAlignment aligned; };
+#define APX_ARENA_ALIGNMENT offsetof(struct ArenaAlignmentProbe, aligned)
+struct ArenaChunk {
+    struct ArenaChunk *next;
+    size_t used, capacity;
+    union ArenaAlignment alignment;
+    unsigned char bytes[];
+};
+static struct ArenaChunk *arena_chunks, *arena_current;
+static size_t arena_backing, arena_next_capacity = APX_ARENA_INITIAL;
 static size_t memory_used;
 static uint64_t fuel_limit = 1000000, fuel_used;
 #ifndef APX_LIBRARY_ONLY
@@ -67,15 +93,60 @@ static void fail_bytes(const char *code, const char *phase, const char *kind, co
 }
 static void fail(const char *code,const char *phase,const char *kind,const char *message){fail_bytes(code,phase,kind,message,strlen(message));}
 static void *allocate(size_t size) {
-    if (size > APX_MEMORY || memory_used > APX_MEMORY - size || size > SIZE_MAX - sizeof(struct Allocation))
+    if (size > APX_MEMORY || memory_used > APX_MEMORY - size)
         fail("R204", "runtime", "memory_limit_exceeded", "native memory limit exceeded");
-    struct Allocation *node = calloc(1, sizeof *node + size);
-    if (!node) fail("R204", "runtime", "memory_limit_exceeded", "native allocation failed");
-    node->next = allocations; allocations = node; memory_used += size;
-    return node + 1;
+    /* Zero-byte callers still receive a valid, aligned, distinct storage slot. */
+    size_t actual = size ? size : 1;
+    if (actual > SIZE_MAX - (APX_ARENA_ALIGNMENT - 1))
+        fail("R204", "runtime", "memory_limit_exceeded", "native allocation size overflow");
+    size_t span = actual + (APX_ARENA_ALIGNMENT - actual % APX_ARENA_ALIGNMENT) % APX_ARENA_ALIGNMENT;
+#ifdef APX_ARENA_ASAN
+    /* Poison intra-chunk boundaries too: a green ordinary ASan heap check alone
+     * would miss an overwrite from one logical arena object into the next. */
+    if (span > SIZE_MAX - APX_ARENA_ALIGNMENT)
+        fail("R204", "runtime", "memory_limit_exceeded", "native allocation size overflow");
+    span += APX_ARENA_ALIGNMENT;
+#endif
+    /* Keep ordinary backing blocks small. Large zero-filled pooled blocks can
+     * force repeated heap trimming/page faults in long-lived JSON consumers.
+     * Large requests get exact-sized backing without displacing the small pool. */
+    int dedicated = span > APX_ARENA_CHUNK_MAX / 2;
+    struct ArenaChunk *chunk = dedicated ? NULL : arena_current;
+    if (!chunk || span > chunk->capacity - chunk->used) {
+        size_t header = sizeof *chunk;
+        if (arena_backing > APX_ARENA_BACKING || header > APX_ARENA_BACKING - arena_backing)
+            fail("R204", "runtime", "memory_limit_exceeded", "native arena backing limit exceeded");
+        size_t available = APX_ARENA_BACKING - arena_backing - header;
+        size_t capacity = dedicated ? span : arena_next_capacity;
+        if (capacity < span) capacity = span;
+        if (capacity > available) capacity = available;
+        if (capacity < span || capacity > SIZE_MAX - header)
+            fail("R204", "runtime", "memory_limit_exceeded", "native arena backing limit exceeded");
+        chunk = calloc(1, header + capacity);
+        if (!chunk) fail("R204", "runtime", "memory_limit_exceeded", "native allocation failed");
+        chunk->capacity = capacity; chunk->next = arena_chunks;
+        arena_chunks = chunk; arena_backing += header + capacity;
+        if (!dedicated) arena_current = chunk;
+        if (!dedicated && arena_next_capacity < APX_ARENA_CHUNK_MAX)
+            arena_next_capacity = arena_next_capacity > APX_ARENA_CHUNK_MAX / 2
+                ? APX_ARENA_CHUNK_MAX : arena_next_capacity * 2;
+#ifdef APX_ARENA_ASAN
+        __asan_poison_memory_region(chunk->bytes, capacity);
+#endif
+    }
+    void *out = chunk->bytes + chunk->used;
+    chunk->used += span; memory_used += size;
+#ifdef APX_ARENA_ASAN
+    __asan_unpoison_memory_region(out, actual);
+#endif
+    return out;
 }
 static void reset_memory(void) {
-    while (allocations) { struct Allocation *next = allocations->next; free(allocations); allocations = next; }
+    while (arena_chunks) {
+        struct ArenaChunk *next = arena_chunks->next;
+        free(arena_chunks); arena_chunks = next;
+    }
+    arena_current = NULL; arena_backing = 0; arena_next_capacity = APX_ARENA_INITIAL;
     memory_used = 0; call_depth = 0;
 }
 static char *copy_bytes(const char *bytes, size_t length) {
