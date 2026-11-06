@@ -1,19 +1,21 @@
 # Local performance measurements
 
-Measured 2026-11-05T05:39:55.855314+00:00. Author-produced on one host; not independently reproduced.
+Measured 2026-11-06T14:12:54.166061+00:00. Author-produced on one host; not independently reproduced.
 
-**The result is mixed.** Apodexis starts a one-shot tool much faster than Python or Node on this corpus, but C, Rust and warmed-up JavaScript lead the non-control kernels. Python also wins several workloads. Do not turn startup savings into a compute-speed claim.
+**The result is mixed.** Native scalar/collection/schema/inlining and JSON optimizations are now included. Array JSON pipelines are much closer to these C/Rust implementations, but core-only gaps remain substantial. C, Rust and warmed-up JavaScript lead most non-control kernels; Python still wins some record-difference measurements. Apodexis has lower one-shot latency than Python or Node here, not a general compute-speed advantage.
 
 ## Method and source
 
 - Nine preregistered cases, five implementations, nine serial rotated rounds: 810 scored rows across steady-state and one-shot modes. Every steady-state row records both core and enclosing pipeline totals.
-- Complete outputs checked on every invocation, including warmup. Additional correctness and wrong-output/count rejection probes passed before scoring.
-- See [frozen protocol and reproduction](../benchmarks/cross_language/README.md), [all source](../benchmarks/cross_language/) and [sanitized reaggregatable observations](../benchmarks/cross_language/results.json). Native source is pinned at [`8ee21c096924`](https://github.com/doesntdev/apodexis/commit/8ee21c0969247a92017d0fa27af9f84bc737df13); the receipt also binds every measured source and binary by hash.
+- Complete outputs checked on every invocation, including warmup. All 55 additional correctness and 50 wrong-output/count rejection probes passed before scoring.
+- See [frozen protocol and reproduction](../benchmarks/cross_language/README.md), [all source](../benchmarks/cross_language/) and [sanitized reaggregatable observations](../benchmarks/cross_language/results.json). Native source is pinned at [`515b512857ab`](https://github.com/doesntdev/apodexis/commit/515b512857abdb08b40def66c9caa2c31167d5ac); the receipt also binds every measured source and binary by hash.
 - Host: AMD Ryzen 9 7900X, Linux 7.0.0-42-generic, x86-64, glibc 2.43. Pinned logical CPU 2, unchanged powersave governor. This is not an isolated or fixed-frequency machine.
 - GCC 15.2, C `-std=c99 -O3`; QBE 1.3 and default `-O2` Apodexis C runtime; Rust 1.95 release opt-level 3 with overflow checks; serde_json 1.0.153; Python 3.14.9 (GIL build, JIT off); Node 24.15.0. No forced GC.
 - Fixed 1,000-call warmup policy, pilot-calibrated repetition counts frozen per case/language. Warmup is not proof of JIT-tier stabilization. Raw totals and counts remain available; min/max reveal retained noise rather than selecting the best round.
 - C uses native typed kernels plus Apodexis JSON transport; Rust uses owned typed data plus serde_json; Python/JavaScript use ordinary stdlib/builtin JSON. These are representative implementations, not optimized record-holder programs or a best-C-JSON-library contest.
 - C/Rust checked-i64 arithmetic is retained. Python arbitrary precision and JavaScript Number are exactly represented on the fixture domain, not equivalent arbitrary-i64 behavior. Baselines do not emulate Apodexis fuel, quotas, immutable snapshots or capability boundaries.
+
+This source also includes the separately tested strict-JSON whitespace repair: raw NUL outside strings is rejected; escaped `\u0000` remains valid. These fresh measurements qualify that exact corrected source, not the predecessor binary. The C implementation reuses the bundled JSON transport, so its pipeline also includes the JSON fast paths.
 
 All tables report **median [minimum–maximum]** of nine per-sample average times. They are not request-latency percentiles. Lower is better. No composite score, subtraction of controls, or cross-boundary speedup is computed.
 
@@ -23,15 +25,15 @@ Fresh parse/typed conversion, computation, full encoding, byte-for-byte full-res
 
 | Workload | Apodexis | C | Rust | Python | JavaScript |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Scalar control | 2.27 [2.19–2.29] | 2.16 [2.13–2.19] | 2.05 [2.05–2.15] | 4.78 [4.73–4.85] | 2.31 [2.30–2.38] |
-| Numeric loop · 256 | 16.00 [15.61–16.33] | 2.27 [2.27–4.82] | 2.20 [2.17–2.25] | 11.76 [11.73–12.17] | 2.63 [2.60–2.65] |
-| Numeric loop · 2,048 | 122.91 [121.06–125.00] | 3.04 [2.98–3.11] | 2.67 [2.65–2.78] | 74.83 [73.61–103.35] | 3.48 [3.45–3.54] |
-| Array sum · 128 | 7.38 [7.34–7.49] | 5.27 [5.22–5.32] | 3.94 [3.81–3.99] | 15.47 [15.38–15.56] | 4.16 [4.11–4.18] |
-| Array sum · 4,096 | 180.65 [174.89–181.73] | 115.92 [115.08–117.80] | 62.65 [62.13–63.72] | 366.96 [365.02–372.81] | 54.96 [54.46–57.10] |
-| Build array · 256 | 16.73 [16.60–19.47] | 9.97 [9.94–10.07] | 4.20 [4.16–4.77] | 13.69 [13.59–14.85] | 4.61 [4.59–4.65] |
-| Build array · 4,096 | 258.92 [256.08–266.66] | 139.06 [137.95–140.32] | 56.30 [55.03–57.11] | 168.84 [164.85–170.84] | 45.74 [44.62–45.89] |
-| Record diff · 32 | 133.58 [131.15–135.51] | 15.58 [15.47–16.51] | 23.37 [23.25–24.45] | 83.30 [82.15–104.01] | 22.38 [21.93–23.48] |
-| Record diff · 64 | 498.24 [483.39–513.39] | 42.98 [42.93–43.70] | 59.94 [59.10–60.38] | 255.46 [252.68–263.98] | 39.02 [37.18–39.82] |
+| Scalar control | 2.17 [2.13–2.28] | 2.17 [2.12–2.31] | 2.12 [2.10–2.29] | 4.83 [4.77–6.19] | 2.38 [2.34–2.42] |
+| Numeric loop · 256 | 3.68 [3.58–3.77] | 2.29 [2.25–2.35] | 2.27 [2.18–2.33] | 11.92 [11.71–13.02] | 2.72 [2.61–2.98] |
+| Numeric loop · 2,048 | 14.71 [14.62–15.22] | 3.03 [3.00–3.11] | 2.62 [2.47–2.70] | 73.61 [71.83–81.78] | 3.56 [3.50–4.56] |
+| Array sum · 128 | 4.17 [4.03–4.24] | 3.77 [3.71–4.39] | 3.95 [3.89–4.23] | 15.77 [15.54–16.78] | 4.13 [4.05–4.38] |
+| Array sum · 4,096 | 78.69 [76.55–88.13] | 66.77 [65.69–85.13] | 62.57 [60.65–66.35] | 371.10 [367.59–401.75] | 54.47 [52.58–62.39] |
+| Build array · 256 | 5.79 [5.66–7.72] | 5.34 [5.21–6.85] | 4.18 [4.10–4.94] | 13.86 [13.74–14.63] | 4.70 [4.53–4.92] |
+| Build array · 4,096 | 94.51 [93.83–98.61] | 58.66 [57.01–92.39] | 55.62 [54.82–58.91] | 168.61 [164.84–176.50] | 45.68 [43.04–53.87] |
+| Record diff · 32 | 78.97 [78.30–82.32] | 14.38 [14.19–14.83] | 23.78 [23.46–24.47] | 83.95 [82.03–104.92] | 24.88 [23.84–28.40] |
+| Record diff · 64 | 304.50 [292.96–314.23] | 41.28 [40.87–42.68] | 59.15 [58.35–61.29] | 258.71 [252.88–380.29] | 40.20 [37.72–41.84] |
 
 ## Instrumented core — µs/invocation
 
@@ -39,15 +41,15 @@ Function/entrypoint and output allocation only. Apodexis generated validation an
 
 | Workload | Apodexis | C | Rust | Python | JavaScript |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Scalar control | 1.13 [1.08–1.15] | 1.04 [1.03–1.05] | 1.00 [1.00–1.05] | 1.14 [1.11–1.16] | 1.08 [1.07–1.15] |
-| Numeric loop · 256 | 13.40 [13.28–13.74] | 1.14 [1.14–1.54] | 1.11 [1.10–1.13] | 8.01 [7.98–8.29] | 1.35 [1.34–1.42] |
-| Numeric loop · 2,048 | 111.23 [109.79–113.09] | 1.92 [1.87–1.97] | 1.58 [1.56–1.63] | 70.93 [69.81–97.59] | 2.20 [2.18–2.22] |
-| Array sum · 128 | 3.13 [3.11–3.16] | 1.05 [1.05–1.08] | 1.07 [1.06–1.09] | 2.36 [2.34–2.40] | 1.46 [1.42–1.52] |
-| Array sum · 4,096 | 66.65 [65.24–67.50] | 1.85 [1.79–1.91] | 2.59 [2.55–2.62] | 44.90 [44.23–45.54] | 2.87 [2.80–2.92] |
-| Build array · 256 | 7.38 [7.31–7.41] | 1.10 [1.09–1.11] | 1.17 [1.16–1.31] | 4.87 [4.83–5.96] | 2.18 [2.16–2.20] |
-| Build array · 4,096 | 115.13 [114.18–121.36] | 1.45 [1.39–1.58] | 2.69 [2.63–3.01] | 72.54 [70.40–74.69] | 10.99 [10.89–11.16] |
-| Record diff · 32 | 121.05 [118.66–123.02] | 6.02 [5.97–6.42] | 5.81 [5.77–5.87] | 58.33 [57.03–78.68] | 7.84 [7.42–9.69] |
-| Record diff · 64 | 462.23 [447.65–476.98] | 24.95 [24.88–25.28] | 23.22 [23.10–23.54] | 207.54 [204.06–215.32] | 16.93 [15.80–17.56] |
+| Scalar control | 1.07 [1.04–1.12] | 1.06 [1.04–1.12] | 1.05 [1.03–1.12] | 1.16 [1.14–1.24] | 1.11 [1.09–1.13] |
+| Numeric loop · 256 | 2.55 [2.49–2.66] | 1.17 [1.13–1.19] | 1.14 [1.10–1.17] | 8.13 [8.05–8.89] | 1.40 [1.34–1.52] |
+| Numeric loop · 2,048 | 13.56 [13.50–14.09] | 1.93 [1.87–1.95] | 1.51 [1.35–1.57] | 69.77 [68.14–77.20] | 2.25 [2.22–2.93] |
+| Array sum · 128 | 1.74 [1.69–1.78] | 1.11 [1.08–1.13] | 1.13 [1.09–1.17] | 2.38 [2.33–2.46] | 1.44 [1.41–1.53] |
+| Array sum · 4,096 | 25.04 [24.53–27.15] | 1.85 [1.76–2.11] | 2.59 [2.48–2.97] | 44.42 [42.50–48.00] | 2.83 [2.72–3.11] |
+| Build array · 256 | 1.94 [1.89–2.71] | 1.12 [1.10–1.26] | 1.20 [1.15–1.25] | 4.88 [4.85–5.15] | 2.21 [2.12–2.24] |
+| Build array · 4,096 | 15.03 [14.74–15.86] | 1.44 [1.38–1.82] | 2.69 [2.56–3.04] | 72.39 [70.54–75.54] | 11.39 [11.00–13.42] |
+| Record diff · 32 | 68.51 [67.74–71.28] | 6.08 [6.04–6.24] | 5.86 [5.80–6.00] | 58.57 [57.21–69.92] | 8.76 [8.05–11.70] |
+| Record diff · 64 | 273.75 [265.27–283.98] | 25.52 [25.42–25.85] | 23.88 [23.56–25.03] | 210.95 [205.63–303.08] | 17.00 [16.01–17.94] |
 
 ## One-shot invocation — ms/process
 
@@ -55,15 +57,19 @@ Parent-observed taskset/spawn, stdin transfer, stdout capture and wait on prebui
 
 | Workload | Apodexis | C | Rust | Python | JavaScript |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Scalar control | 1.92 [1.06–2.04] | 1.09 [0.89–1.85] | 1.22 [1.11–2.13] | 15.84 [15.72–16.15] | 19.23 [18.48–21.79] |
-| Numeric loop · 256 | 1.84 [1.50–5.62] | 1.10 [1.05–4.22] | 1.22 [1.20–4.08] | 15.89 [15.56–21.91] | 19.78 [18.66–22.02] |
-| Numeric loop · 2,048 | 2.33 [2.02–2.59] | 1.30 [1.06–1.55] | 1.23 [1.19–1.55] | 16.44 [16.04–17.06] | 19.38 [18.54–20.05] |
-| Array sum · 128 | 1.71 [1.44–2.18] | 1.10 [1.04–1.23] | 1.20 [1.14–1.67] | 16.09 [15.74–18.32] | 19.91 [18.83–21.79] |
-| Array sum · 4,096 | 2.33 [2.10–2.38] | 1.33 [1.29–1.48] | 1.34 [1.29–1.37] | 16.42 [16.10–18.11] | 19.73 [18.73–20.56] |
-| Build array · 256 | 2.02 [1.73–3.04] | 1.11 [1.07–1.33] | 1.23 [1.19–1.29] | 15.81 [15.70–16.18] | 19.43 [18.48–20.50] |
-| Build array · 4,096 | 2.64 [2.37–2.94] | 1.61 [1.37–4.24] | 1.39 [1.32–4.63] | 16.74 [15.94–35.09] | 19.75 [19.33–34.61] |
-| Record diff · 32 | 2.18 [1.79–2.48] | 1.10 [1.05–1.58] | 1.49 [1.29–1.62] | 16.11 [16.05–16.74] | 20.46 [18.68–25.42] |
-| Record diff · 64 | 3.00 [2.67–3.26] | 1.16 [1.12–1.39] | 1.30 [1.29–1.33] | 16.52 [16.36–17.08] | 21.68 [20.40–24.08] |
+| Scalar control | 1.63 [1.39–1.92] | 1.08 [0.95–1.15] | 1.22 [1.09–1.37] | 16.87 [16.18–17.37] | 20.26 [18.67–23.44] |
+| Numeric loop · 256 | 1.61 [1.48–2.92] | 1.11 [0.99–1.44] | 1.27 [1.14–1.34] | 16.54 [15.92–17.16] | 19.27 [18.46–20.60] |
+| Numeric loop · 2,048 | 1.65 [1.38–1.96] | 1.32 [1.09–11.54] | 1.28 [1.11–1.55] | 16.79 [16.19–18.73] | 19.51 [18.81–20.77] |
+| Array sum · 128 | 1.57 [1.40–1.90] | 1.21 [1.09–1.35] | 1.32 [1.12–1.70] | 16.42 [16.10–18.39] | 20.25 [19.20–21.68] |
+| Array sum · 4,096 | 1.89 [1.82–2.15] | 1.39 [1.30–1.54] | 1.39 [1.36–1.46] | 17.27 [16.72–17.78] | 20.28 [19.79–21.16] |
+| Build array · 256 | 1.62 [1.40–1.68] | 1.16 [0.93–1.44] | 1.26 [1.19–1.41] | 16.82 [15.81–21.29] | 21.27 [18.90–25.85] |
+| Build array · 4,096 | 1.76 [1.54–2.05] | 1.49 [1.36–1.69] | 1.41 [1.32–1.63] | 16.82 [16.55–18.31] | 20.04 [19.29–21.59] |
+| Record diff · 32 | 1.89 [1.73–2.51] | 1.16 [1.03–1.51] | 1.51 [1.34–1.74] | 16.84 [16.44–18.25] | 20.55 [19.76–22.98] |
+| Record diff · 64 | 2.72 [2.49–3.46] | 1.32 [1.20–1.47] | 1.40 [1.25–1.68] | 17.71 [17.13–18.98] | 22.66 [20.55–24.90] |
+
+## Previous cross-language snapshot
+
+The [2026-11-05 observations](../benchmarks/cross_language/history/2026-11-05-results.json) are retained byte-for-byte, with their original source and timing identities. They are historical, not measurements of the new implementation; the [original methodology and tables](https://github.com/doesntdev/apodexis/blob/282d69059297f602156381547169d6cbd991a59f/docs/benchmarks.md) remain available. Do not compare absolute medians across campaigns as if they were a paired speedup experiment.
 
 ## Separate historical runtime improvement
 
