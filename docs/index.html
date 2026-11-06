@@ -129,6 +129,7 @@
         <div><dt><span aria-hidden="true">04</span> Structured agent tooling</dt><dd>Local MCP discovery, language resources, diagnostics, guarded repairs, source tests, JSON contracts, execution, and deterministic pseudocode for review.</dd></div>
         <div><dt><span aria-hidden="true">05</span> Modules and pure libraries</dt><dd>Explicit imports and exports, sibling-file CLI resolution, and inline MCP bundles. Unicode-scalar string operations, strict conversions, maps, and immutable array and record updates.</dd></div>
         <div><dt><span aria-hidden="true">06</span> Deliberately granted effects</dt><dd>Brokered file reads/writes, named environment reads, wall clock, entropy, and exact-URL HTTP GET. Only an operator-owned CLI capability policy grants access; ordinary MCP calls and source tests remain ungranted.</dd></div>
+        <div><dt><span aria-hidden="true">07</span> Typed JSON documents</dt><dd>Decode strict JSON strings into declared scalar, array, map and record types, including imported records. Data errors return typed results; resource exhaustion remains terminal. See the <a href="https://github.com/doesntdev/apodexis/blob/main/docs/config-validator.md">configuration validator and its test cases</a>.</dd></div>
       </dl>
       <aside class="boundary-note" aria-labelledby="boundary-title">
         <h3 id="boundary-title">Know the boundary.</h3>
@@ -150,6 +151,7 @@
         <p>This snapshot includes the native scalar, collection, schema, inlining and JSON optimizations. Array JSON pipelines are closer to these C/Rust implementations, but core-only gaps remain substantial. Python still wins some record-difference measurements; lower one-shot latency is not a general compute-speed claim.</p>
       </div>
       <p class="benchmark-note">Measured <time datetime="2026-11-06T14:12:54.166061+00:00">2026-11-06</time> · <a href="https://github.com/doesntdev/apodexis/commit/515b512857abdb08b40def66c9caa2c31167d5ac">source 515b512857ab</a> · <a href="https://github.com/doesntdev/apodexis/blob/main/benchmarks/cross_language/history/2026-11-05-results.json">Previous snapshot</a></p>
+      <p class="benchmark-note">The tables retain that measured source. Subsequent checked-index lowering and typed JSON decoding are not a rerun of this cross-language campaign.</p>
       <h3>Steady-state JSON work</h3>
       <p class="benchmark-note">Fresh JSON parse, computation, complete encoding, full-result verification and cleanup. After 1,000 untimed warmup calls; compilation, imports, process startup, broker and sandbox setup excluded.</p>
         <div class="benchmark-scroll" tabindex="0" role="region" aria-label="In-process JSON pipeline · µs / invocation; horizontally scrollable">
