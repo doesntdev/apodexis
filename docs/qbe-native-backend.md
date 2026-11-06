@@ -126,6 +126,87 @@ hash and compiler-issued-payload preconditions. They return revised inline
 source rather than writing files. Pseudocode is a readable projection, not an
 alternative executable contract.
 
+## Native scalar representation
+
+Checked `i64` expressions, local bindings, function parameters and helper returns
+use QBE `l` machine integers. `bool` uses QBE `w`, including consistent word-sized
+local loads/stores and call signatures. Boolean `&` and `|` still evaluate both
+operands in textual order. Integer comparisons and boolean operations consume
+registers; a small nonallocating runtime helper preserves checked addition,
+subtraction, multiplication, division and remainder. Both division and remainder
+trap on `i64::MIN / -1` (or `% -1`), and both reject a zero divisor.
+
+The public `apx_entry(ApxValue *)` ABI and `apx_test_run` remain boxed. The entry
+wrapper validates input before unboxing a scalar parameter and boxes a scalar
+answer. Scalars are explicitly boxed at generic builtin, record, variant and
+host-operation boundaries, then checked and unboxed on scalar reads and match
+payloads. Typed i64 literals and proven private i64 builders instead write raw
+integers; typed `E` and index reads accept both packed and legacy boxed arrays
+without allocating scalar boxes. Float/bool/string arrays and operations retain
+their existing representations. Checked named-record reads use declaration-order
+positions, as described below.
+
+Statement/loop fuel charges and logical function enter/leave checks remain at
+their existing points, with no batching. Small scalar leaf helpers may be
+inlined under the bounded rules below; their logical calls are still metered.
+Pure scalar numeric loops need no per-iteration scalar allocation; transformed
+input values and public input/output objects still allocate.
+`make test-native-scalars` checks emitted IR, links a real generated entrypoint
+to an allocation observer, and exercises mixed boundaries, eager errors, checked arithmetic, fuel and recursion.
+The same test's runtime helpers and linked observer run under ASan/UBSan in
+`make test-sanitize`; ordinary driver-managed worker execution remains separate.
+
+## Bounded helper inlining and compiled metering
+
+The initial inline rule accepts only functions with one return statement, scalar
+`i64`/`bool` parameters and result, and a leaf expression made from scalar
+literals, parameters, checked integer arithmetic, comparisons and eager boolean
+operations. No user calls occur in an eligible body, so recursive cycles cannot
+qualify. Locals, branches, loops, containers, floats, generic builtins and host
+effects retain out-of-line calls. An eligible expression has at most 32 AST nodes
+and 16 parameters. Each emitted function expands at most 256 AST nodes and 32
+call sites; remaining calls retain the same native ABI. Out-of-line definitions
+are retained even for eligible helpers.
+
+Arguments execute exactly once in textual order, in the caller, before the
+logical callee enter. The inline expression substitutes those native registers
+by checked callee parameter ID, not caller-local slots. This preserves bool/i64
+widths, unused-argument effects and nested argument calls without binding-ID
+collisions. An inlined call still enters, charges its return statement, computes
+with the existing checked operations, and leaves. Physical call removal does not
+remove logical recursion limits or any semantic fuel.
+
+Fixed one-unit statement and two-unit taken-loop charges use direct QBE state
+operations at the original points. Each charge checks unsigned addition wrap and
+unsigned `next > limit`, then stores only on success. This includes nondefault
+limits above `INT64_MAX` and near `UINT64_MAX`. There is no loop-wide batching or
+speculative precharge. Logical enter stores the incremented depth before checking
+the unchanged 256-frame limit; leave decrements only a nonzero depth. Per-function
+cold blocks call the runtime's exact existing fuel/depth diagnostics and terminate
+with QBE `hlt` if a failure helper were ever to return.
+
+The trusted internal amd64_sysv `ApxExecutionState` ABI is align 8, size 24:
+`uint64_t limit` at offset 0, `uint64_t used` at 8, `int32_t depth` at 16, and a
+reserved zero word at 20. Header-level C99 layout assertions and linked tests pin
+these offsets. Generated code and compatibility `apx_charge`, `apx_enter` and
+`apx_leave` all use the one `apx_execution_state` object, initialized to a
+1,000,000 fuel limit and zero usage/depth. Only addresses are hoisted, not shadow
+counters across calls. Arena/JSON reset clears depth but preserves fuel limit
+and usage; invocation/test drivers retain their existing initialization policy.
+Private in-process fixture names remain aliases of this state. This is serial
+execution state, not a new thread-safe or reentrant embedding API.
+
+`make test-native-calls` checks eligible/fallback IL and expansion bounds, then
+links generated objects to a runtime observer for exact complete outputs,
+diagnostics, every charge boundary on finite statement/loop/call traces,
+uint64 fuel edges, argument order and logical-depth failures before reset.
+Direct/mutual recursion and calls into an inline leaf at the depth boundary are
+included. Compatibility API interleaving, repeated entries, reset/recovery,
+no-main source tests and real explicitly authorized argument file writes are
+also exercised. `make test-sanitize` instruments both the observer and its linked
+runtime with ASan/UBSan; generated QBE instructions are not sanitizer-instrumented.
+These are correctness/representation checks, not a measured speedup claim.
+
 ## Runtime allocation and construction
 
 Runtime values use bounded, zero-initialized execution-lifetime arenas. Small
@@ -149,7 +230,40 @@ frontier writes only a previously invisible slot; a divergent alias starts a new
 block. `finish` materializes an indexed array and caches that immutable result
 for repeated finishes of the same snapshot. This does not consume the builder,
 mutate earlier arrays, preallocate the declared full capacity, or enlarge every
-scalar value. Other arrays/records retain their existing direct construction.
+scalar value. This persistent path remains the fallback for aliases and forks.
+
+Typed i64 literals use contiguous `int64_t` buffers behind the same opaque array
+API. Parsed JSON arrays remain boxed: validation does not repack inputs. Equality
+and JSON encoding use synchronous, nonescaping scalar
+views; packed slice/set/concatenation preserve raw storage where possible. Other
+compatibility consumers obtain stable, arena-owned scalar boxes through a bounded
+memoized cache, never pointer-cast integer storage. `apx_json_item` contains boxing
+allocation failures locally and returns null; successful items live until reset,
+including across later encoding or construction. Raw runtime accessors still trap
+through the caller's active execution boundary.
+
+The compiler selects private i64 construction only after examining every use of
+a checked local binding ID across the whole function, including branches. Its
+permitted uses are `count`, `cap`, `finish` and a direct self-assigned `push` (also
+`P` shorthand). Alias assignments, forks, embedding and any unsupported use disable
+the optimization for the entire binding. Builder function-boundary types remain
+rejected by the existing frontend. No ownership syntax or new ownership system
+is introduced. Other builder element types retain the persistent implementation.
+
+A proven private builder reuses one descriptor and grows its raw buffer
+geometrically, bounded by declared capacity and existing allocation limits.
+Capacity initialization is metadata-only, even at the maximum i64 capacity.
+Finished arrays capture a buffer and length; append writes only the next invisible
+slot, and growth retains the previous backing until reset. Repeated finishes at
+an unchanged length reuse the cached array; later appends invalidate only the
+builder's cache, not earlier arrays or boxed items. Allocation failures publish no
+partial growth or finish state. All retained backing and compatibility boxes count
+against the unchanged payload and backing limits.
+
+`make test-native-collections` covers packed/generic consumers, extrema, alias and
+fork fallback, captured prefixes at 0/1/63/64/65/4096, capacity/OOM recovery and
+actual compiled-entry packing/private-append allocation. It is included in the
+default suite and selected ASan/UBSan paths, alongside the scalar-loop observer.
 
 Allocation representation can change OOM timing, but not the structured failure
 contract or the quota itself. ASan builds add poisoned logical-object boundaries
@@ -159,14 +273,117 @@ keeps timing, allocation counters, peak RSS and installed-process checks at
 separate boundaries. It is not a compiler/runtime dependency or a universal
 performance claim.
 
+## Known record shapes and static input schemas
+
+The compiler resolves each checked field read from its receiver's named type,
+not a field-name-only table. The bounded `apx_field_index` helper reads a constant
+declaration-order position and returns the ordinary boxed member; scalar reads
+then use the existing checked unboxing boundary. Constructors, validated input
+records and immutable `with` copies all retain that layout. Name-based `apx_field`
+and C JSON getters remain available for dynamic/compatibility consumers.
+
+Generated `apx_entry` calls `apx_validate_static` with artifact-lifetime readonly
+QBE data, not a parsed schema or an arena-backed global cache. The checked
+schema-eligibility/depth walk still runs before descriptor emission. Exported
+`apx_schema_json` bytes and contract metadata are unchanged; the compatibility
+`apx_validate(const char *, ApxValue *)` still parses and validates dynamic schema
+JSON. Zero-parameter mains retain the null-schema pass-through behavior, and
+source-test artifacts remain independent of host-input ABI eligibility.
+
+The internal amd64_sysv C/QBE descriptor ABI is explicit: align 8, size 48,
+six 8-byte slots (`kind` at 0, `name` at 8, `count` at 16, `item` at 24,
+`error` at 32, `fields` at 40). Each field is an align-8, 16-byte pair of name
+and descriptor pointers at offsets 0 and 8. Kind values are null=0, i64=1,
+f64=2, bool=3, str=4, array=5, map=6, option=7, result=8, struct=9.
+This trusted internal pointer ABI is not a wire format or an interface for
+untrusted descriptor addresses. Null children, invalid kinds/counts and recursive
+depth are defensively checked; descriptor storage must itself be addressable.
+
+Validation retains declaration-order member errors before extra-field errors,
+including the legacy extra-field selection rule. Typed map keys retain
+length-aware unsigned UTF-8 sorting and embedded NUL bytes. Supported map
+payloads include nested arrays/records/options/results, with `err` payloads in
+`error`, not `value`. Integer-to-f64 promotion and text-backed parsed-integer
+float normalization are unchanged. All transformed values and temporary map-key
+arrays remain arena/quota-accounted; descriptors themselves allocate nothing
+per invocation and survive reset without retaining execution values.
+
+`make test-native-shapes` checks emitted constant positions, explicit C layout,
+readonly ELF descriptor segments, exact exported schemas and linked-entry
+outputs/errors/fuel. It interposes generated validator calls to reject dynamic
+schema parsing and checks scalar entry allocations across repeated calls and
+resets. Invalid descriptors, depth boundaries and allocation-failure recovery
+are also exercised. The focused suite and its linked runtime observers run under
+ASan/UBSan in `make test-sanitize`; QBE-generated instructions are not themselves
+sanitizer-instrumented. These are representation/compatibility checks, not a
+performance qualification claim.
+
+## JSON fast paths and backend assessment
+
+The bounded JSON number grammar is unchanged. Representable signed i64 tokens
+are accumulated directly from the supplied bytes, with unsigned magnitude/range
+checks and no temporary token or `strtoll`. Decimal/exponent tokens and integers
+outside i64 retain the existing finite `strtod` fallback; raw large-integer text
+remains available for exact unsigned64 access and encoding. Finite subnormals,
+underflow, signed zero and float round-trip spelling retain their existing paths.
+Signed integer output uses a bounded 20-byte stack buffer, not per-value
+`snprintf`/`strlen`.
+
+Unescaped strings are copied once after bounded control/UTF-8 validation; escaped
+strings keep the escape/surrogate decoder. Encoding emits ordinary byte runs in
+bulk and preserves its byte treatment of C-created strings. Key lengths, embedded
+escaped NUL, sorted output, depth/quota checks and caller-owned encoded buffers
+are unchanged. A separate correctness-only repair replaces the preexisting
+`strchr` whitespace predicate, which also matched its terminating NUL, with
+explicit space/tab/CR/LF recognition. Raw NUL at a whitespace-skip position is
+now rejected as invalid JSON (for example the supplied bytes `null\0` or
+`"a"\0`), an intentional invalid-input compatibility change. Raw NUL inside a
+string remains invalid; escaped `\u0000` remains valid and length-aware. Earlier
+benchmark evidence is historical and does not qualify this correctness repair.
+Allocation representation and OOM locations may change, not the hard quotas or
+guarded public-API recovery contract.
+
+`make test-native-json` checks token allocation, forbidden integer formatting,
+bulk copies, exact numeric/string/error vectors, bounded buffers, deterministic
+fuzz, quotas and failure/reset/retry. It also compiles and links real generated
+entries. The target is in the default suite; `make test-sanitize` instruments both
+its observers and linked C runtime (not QBE-generated instructions).
+
+Backend disposition: retain QBE `amd64_sysv` and the default C99 `-O2` build
+flags. Inspection of current generated SSA and assembled machine code for
+`benchmarks/runtime_memory/cases/{numeric-helpers,each-sum,builder-writeback,agent-rowdiff}.apx`
+shows register-valued scalar loops, direct fuel/depth guards, checked-arithmetic
+runtime calls, packed reads/private-builder calls, and indexed record reads.
+Numeric main has four checked-arithmetic call sites and no call to its inlined
+leaf; each-sum retains a typed item-read and checked-add call in its loop;
+builder-writeback retains private append and checked increment calls. Rowdiff
+retains generic string comparisons/builders and nested linear searches. Static
+entry validation remains outside these authored functions.
+
+For the inspected objects, numeric main (`f1`), each main (`f0`), builder main
+(`f0`) and rowdiff's diff (`f3`) contain respectively 162/111/138/546 decoded
+instructions and 6/5/6/49 call sites. These are static whole-function counts,
+including cold failures and alignment instructions, not executed instruction
+counts or timing attribution. Reproduce with `bin/apodexis emit-qbe SOURCE >
+"$TMPDIR/program.ssa"`, `.build/tools/qbe -t amd64_sysv -o "$TMPDIR/program.s"
+"$TMPDIR/program.ssa"`, `as "$TMPDIR/program.s" -o "$TMPDIR/program.o"`, then
+`objdump -dr --no-show-raw-insn "$TMPDIR/program.o"`.
+
+This structure identifies remaining runtime/lowering work, but does not establish
+QBE as the dominant cost or a backend ceiling. No controlled alternative-backend
+or release-flag comparison was performed; it supports neither a projected LLVM
+speedup nor C/Rust parity. JSON-pipeline timing, core execution and cumulative
+cross-language qualification remain separate measurements.
+
 ## Boundaries
 
 - **Platform:** Linux x86-64/glibc with QBE `amd64_sysv`. Other backend targets are
   not qualified deployment targets.
 - **Language/ABI:** ordinary source/type checking has a depth-64 budget. Protocol
   JSON and generated-schema wrappers have separate finite budgets. General
-  custom-enum construction/execution and option/result/enum JSON inputs are not
-  implemented; option/result values and matches inside native functions/tests
+  custom-enum construction/execution and general option/result/enum JSON inputs
+  are not implemented (options/results are supported inside typed map payloads);
+  option/result values and matches inside native functions/tests
   are supported. Builders are local-only.
 - **Execution:** runtime arenas, recursion, fuel, input/output and process output
   are bounded. Driver-managed children have CPU, address-space, stack, file-size

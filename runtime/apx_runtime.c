@@ -28,7 +28,6 @@
 #define APX_MEMORY (128u * 1024u * 1024u)
 #define APX_INPUT (8u * 1024u * 1024u)
 #define APX_OUTPUT (8u * 1024u * 1024u)
-#define APX_DEPTH 256
 #define JSON_DEPTH 128
 #define VALUE_TYPE_DEPTH 64
 #define GENERATED_SCHEMA_DEPTH (4u * VALUE_TYPE_DEPTH + 16u)
@@ -52,6 +51,7 @@
 
 enum Kind { VNULL, VBOOL, VINT, VFLOAT, VSTR, VARRAY, VRECORD, VVARIANT, VBUILDER, VMAP };
 struct BuilderBlock;
+struct PrivateI64Builder;
 struct ApxValue {
     enum Kind kind;
     int64_t integer;
@@ -62,6 +62,8 @@ struct ApxValue {
     union {
         const char **names;
         struct BuilderBlock *builder_tail;
+        int64_t *i64; /* VARRAY integer==1: packed, items is a stable box cache. */
+        struct PrivateI64Builder *private_i64; /* compiler-proven VBUILDER */
     } members;
     size_t *key_lengths; /* Raw JSON objects and typed maps retain embedded NUL. */
 };
@@ -73,6 +75,11 @@ struct BuilderBlock {
     struct BuilderBlock *previous;
     size_t prefix_length, used, capacity;
     ApxValue *items[];
+};
+struct PrivateI64Builder {
+    int64_t *data;
+    size_t allocated;
+    ApxValue *finished;
 };
 union ArenaAlignment { long double real; int64_t integer; void *pointer; };
 struct ArenaAlignmentProbe { char byte; union ArenaAlignment aligned; };
@@ -86,17 +93,20 @@ struct ArenaChunk {
 static struct ArenaChunk *arena_chunks, *arena_current;
 static size_t arena_backing, arena_next_capacity = APX_ARENA_INITIAL;
 static size_t memory_used;
-static uint64_t fuel_limit = 1000000, fuel_used;
+ApxExecutionState apx_execution_state = {1000000, 0, 0, 0};
+/* Preserve private in-process fixture names, without shadow execution state. */
+#define fuel_limit (apx_execution_state.limit)
+#define fuel_used (apx_execution_state.used)
+#define call_depth (apx_execution_state.depth)
 #ifndef APX_LIBRARY_ONLY
 static uint64_t input_limit = UINT64_MAX, output_limit = UINT64_MAX;
 #endif
-static int call_depth;
 static jmp_buf escape;
 static jmp_buf *trap_target=&escape;
 static char error_code[32], error_kind[80], error_message[65537], error_phase[32];
 static size_t error_message_length;
 
-static void fail_bytes(const char *code, const char *phase, const char *kind, const char *message,size_t length) {
+static APX_NORETURN void fail_bytes(const char *code, const char *phase, const char *kind, const char *message,size_t length) {
     snprintf(error_code, sizeof error_code, "%s", code);
     snprintf(error_phase, sizeof error_phase, "%s", phase);
     snprintf(error_kind, sizeof error_kind, "%s", kind);
@@ -104,7 +114,7 @@ static void fail_bytes(const char *code, const char *phase, const char *kind, co
     memcpy(error_message,message,error_message_length);error_message[error_message_length]=0;
     longjmp(*trap_target, 1);
 }
-static void fail(const char *code,const char *phase,const char *kind,const char *message){fail_bytes(code,phase,kind,message,strlen(message));}
+static APX_NORETURN void fail(const char *code,const char *phase,const char *kind,const char *message){fail_bytes(code,phase,kind,message,strlen(message));}
 static void *allocate(size_t size) {
     if (size > APX_MEMORY || memory_used > APX_MEMORY - size)
         fail("R204", "runtime", "memory_limit_exceeded", "native memory limit exceeded");
@@ -182,10 +192,38 @@ ApxValue *apx_array_new(int64_t n) {
     size_check(n, sizeof(ApxValue *)); ApxValue *out = value(VARRAY); out->length = (size_t)n;
     out->items = allocate(out->length * sizeof *out->items); return out;
 }
+ApxValue *apx_array_i64_new(int64_t n) {
+    size_check(n, sizeof(int64_t));
+    ApxValue *out = value(VARRAY); out->integer = 1; out->length = (size_t)n;
+    out->members.i64 = allocate(out->length * sizeof *out->members.i64);
+    return out;
+}
+/* Non-escaping scratch views are for synchronous recursive consumers only.
+ * Accessors returning values instead use arena-owned, memoized scalar boxes. */
+static ApxValue *array_read(ApxValue *array, size_t index, ApxValue *scratch) {
+    if (!array->integer) return array->items[index];
+    memset(scratch, 0, sizeof *scratch); scratch->kind = VINT;
+    scratch->integer = array->members.i64[index]; return scratch;
+}
+static ApxValue *array_item(ApxValue *array, size_t index) {
+    if (!array->integer) return array->items[index];
+    if (!array->items) array->items = allocate(array->length * sizeof *array->items);
+    if (!array->items[index]) array->items[index] = apx_int(array->members.i64[index]);
+    return array->items[index];
+}
+void apx_array_i64_put(ApxValue *array, int64_t index, int64_t item) {
+    if (!array || array->kind != VARRAY || !array->integer || index < 0 || (uint64_t)index >= array->length)
+        fail("R103", "runtime", "index_out_of_bounds", "array index out of bounds");
+    array->members.i64[index] = item;
+    if (array->items) array->items[index] = NULL;
+}
 void apx_array_put(ApxValue *array, int64_t index, ApxValue *item) {
     if (!array || array->kind != VARRAY || index < 0 || (uint64_t)index >= array->length)
         fail("R103", "runtime", "index_out_of_bounds", "array index out of bounds");
-    array->items[index] = item;
+    if (array->integer) {
+        if (!item || item->kind != VINT) fail("T101", "type", "type_mismatch", "expected i64");
+        apx_array_i64_put(array, index, item->integer);
+    } else array->items[index] = item;
 }
 ApxValue *apx_record_new(const char *name, int64_t n) {
     size_check(n, sizeof(ApxValue *)); ApxValue *out = value(VRECORD); out->text = name; out->length = (size_t)n;
@@ -227,6 +265,12 @@ static ApxValue *find_field(ApxValue *v, const char *name) {
     if (!v || v->kind != VRECORD) return NULL;
     return find_key(v,name,strlen(name));
 }
+ApxValue *apx_field_index(ApxValue *v, int64_t index) {
+    if (!v || v->kind != VRECORD) fail("T101", "type", "type_mismatch", ". expects struct value");
+    if (index < 0 || (uint64_t)index >= v->length || !v->items || !v->items[index])
+        fail("R999", "runtime", "trap", "invalid native record field access");
+    return v->items[index];
+}
 ApxValue *apx_field(ApxValue *v, const char *name) {
     if (!v || v->kind != VRECORD) fail("T101", "type", "type_mismatch", ". expects struct value");
     ApxValue *out = find_field(v, name);
@@ -241,6 +285,7 @@ static int64_t integer(ApxValue *v) {
     if (!v || v->kind != VINT) fail("T101", "type", "type_mismatch", "expected i64");
     return v->integer;
 }
+int64_t apx_i64_raw(ApxValue *v) { return integer(v); }
 int64_t apx_length_raw(ApxValue *v) {
     if (!v || v->kind != VARRAY) fail("T101", "type", "type_mismatch", "E expects an array");
     return (int64_t)v->length;
@@ -248,27 +293,74 @@ int64_t apx_length_raw(ApxValue *v) {
 ApxValue *apx_at_raw(ApxValue *v, int64_t index) {
     if (!v || v->kind != VARRAY) fail("T101", "type", "type_mismatch", "@ expects array");
     if (index < 0 || (uint64_t)index >= v->length) fail("R103", "runtime", "index_out_of_bounds", "array index out of bounds");
-    return v->items[index];
+    return array_item(v, (size_t)index);
 }
+int64_t apx_array_i64_at(ApxValue *v, int64_t index) {
+    if (!v || v->kind != VARRAY) fail("T101", "type", "type_mismatch", "@ expects array");
+    if (index < 0 || (uint64_t)index >= v->length) fail("R103", "runtime", "index_out_of_bounds", "array index out of bounds");
+    return v->integer ? v->members.i64[index] : integer(v->items[index]);
+}
+/* Only generated, whole-binding-proven construction may use these operations.
+ * A finished array captures the length and backing. Appends never overwrite an
+ * existing slot; growth keeps the old arena allocation alive until reset. */
+ApxValue *apx_builder_i64_private_new(int64_t capacity) {
+    if (capacity < 0) fail("R301", "runtime", "builder_capacity_exceeded", "negative builder capacity");
+    ApxValue *out = value(VBUILDER); out->integer = 1; out->capacity = (size_t)capacity;
+    out->members.private_i64 = allocate(sizeof *out->members.private_i64); return out;
+}
+ApxValue *apx_builder_i64_private_push(ApxValue *builder, int64_t item) {
+    if (!builder || builder->kind != VBUILDER || !builder->integer)
+        fail("T101", "type", "type_mismatch", "push expects private i64 builder");
+    if (builder->length >= builder->capacity)
+        fail("R301", "runtime", "builder_capacity_exceeded", "builder capacity exceeded");
+    size_check((int64_t)builder->length + 1, sizeof(int64_t));
+    struct PrivateI64Builder *storage = builder->members.private_i64;
+    if (builder->length == storage->allocated) {
+        size_t n = storage->allocated ? storage->allocated * 2 : APX_BUILDER_BLOCK_CAPACITY;
+        if (n > builder->capacity) n = builder->capacity;
+        if (n > APX_MEMORY / sizeof(int64_t)) n = APX_MEMORY / sizeof(int64_t);
+        int64_t *data = allocate(n * sizeof *data);
+        if (builder->length) memcpy(data, storage->data, builder->length * sizeof *data);
+        storage->data = data; storage->allocated = n;
+    }
+    storage->data[builder->length++] = item; storage->finished = NULL; builder->items = NULL;
+    return builder;
+}
+static ApxValue *private_i64_finish(ApxValue *builder) {
+    struct PrivateI64Builder *storage = builder->members.private_i64;
+    if (!storage->finished) {
+        ApxValue *out = value(VARRAY); out->integer = 1; out->length = builder->length;
+        out->members.i64 = storage->data; storage->finished = out;
+    }
+    return storage->finished;
+}
+void apx_fuel_exhausted(void) { fail("R201", "runtime", "fuel_exhausted", "fuel exhausted"); }
+void apx_depth_exhausted(void) { fail("R205", "runtime", "recursion_limit_exceeded", "native recursion limit exceeded"); }
 void apx_charge(int64_t n) {
     if (n < 0 || (uint64_t)n > fuel_limit || fuel_used > fuel_limit - (uint64_t)n)
-        fail("R201", "runtime", "fuel_exhausted", "fuel exhausted");
+        apx_fuel_exhausted();
     fuel_used += (uint64_t)n;
 }
-void apx_assert(ApxValue *v) { if (!apx_truth(v)) fail("X101", "test", "assertion_failed", "assertion failed"); }
+void apx_assert_raw(int32_t condition) { if (!condition) fail("X101", "test", "assertion_failed", "assertion failed"); }
+void apx_assert(ApxValue *v) { apx_assert_raw(apx_truth(v)); }
 void apx_trap(const char *message) { fail("R999", "runtime", "trap", message); }
 void apx_trap_value(ApxValue *v){
     if(!v||v->kind!=VSTR)fail("T101","type","type_mismatch","Z expects str");
     fail_bytes("R999","runtime","trap",v->text,v->length);
 }
 void apx_missing_return(void) { fail("T105", "type", "missing_return", "function did not return"); }
-void apx_enter(void) { if (++call_depth > APX_DEPTH) fail("R205", "runtime", "recursion_limit_exceeded", "native recursion limit exceeded"); }
+void apx_enter(void) { if (++call_depth > APX_DEPTH) apx_depth_exhausted(); }
 void apx_leave(void) { if (call_depth) --call_depth; }
 
 static ApxValue **builder_items(ApxValue *builder) {
     if (!builder->items && builder->length) {
         size_check((int64_t)builder->length, sizeof(ApxValue *));
         ApxValue **items = allocate(builder->length * sizeof *items);
+        if (builder->integer) {
+            struct PrivateI64Builder *storage = builder->members.private_i64;
+            for (size_t i=0;i<builder->length;i++) items[i]=apx_int(storage->data[i]);
+            builder->items=items; return items;
+        }
         struct BuilderBlock *block = builder->members.builder_tail;
         size_t end = builder->length;
         while (end) {
@@ -307,9 +399,13 @@ static int equal(ApxValue *a, ApxValue *b, unsigned depth) {
         return 1;
     case VARRAY: case VBUILDER: {
         if (a->length != b->length) return 0;
-        ApxValue **left = a->kind == VBUILDER ? builder_items(a) : a->items;
-        ApxValue **right = b->kind == VBUILDER ? builder_items(b) : b->items;
-        for (size_t i = 0; i < a->length; ++i) if (!equal(left[i],right[i],depth+1)) return 0;
+        if (a->kind == VBUILDER) {
+            ApxValue **left = builder_items(a), **right = builder_items(b);
+            for (size_t i = 0; i < a->length; ++i) if (!equal(left[i],right[i],depth+1)) return 0;
+        } else for (size_t i = 0; i < a->length; ++i) {
+            ApxValue left, right;
+            if (!equal(array_read(a,i,&left),array_read(b,i,&right),depth+1)) return 0;
+        }
         return 1;
     }
     }
@@ -317,6 +413,22 @@ static int equal(ApxValue *a, ApxValue *b, unsigned depth) {
 }
 static void overflow(void) { fail("R102", "runtime", "integer_overflow", "integer overflow"); }
 static void zero(void) { fail("R101", "runtime", "divide_by_zero", "divide by zero"); }
+/* Nonallocating checked scalar ABI. Both signed division and remainder reject
+ * MIN/-1, matching the boxed compatibility operations (including remainder). */
+int64_t apx_i64_checked(int32_t op, int64_t x, int64_t y) {
+    int64_t z = 0;
+    switch (op) {
+    case 1: if (__builtin_add_overflow(x,y,&z)) overflow(); break;
+    case 2: if (__builtin_sub_overflow(x,y,&z)) overflow(); break;
+    case 3: if (__builtin_mul_overflow(x,y,&z)) overflow(); break;
+    case 4: case 5:
+        if (!y) zero();
+        if (x == INT64_MIN && y == -1) overflow();
+        z = op == 4 ? x/y : x%y; break;
+    default: apx_trap("invalid native scalar opcode");
+    }
+    return z;
+}
 /* Pure operations use only arena snapshots and libc, never JSON reparsing. */
 static void require_kind(ApxValue *v,enum Kind kind){if(!v||v->kind!=kind)fail("T101","type","type_mismatch","invalid pure-library operand type");}
 static void bounds(void){fail("R103","runtime","index_out_of_bounds","slice or index out of bounds");}
@@ -405,10 +517,37 @@ static ApxValue *pure_builtin(int32_t op,ApxValue *a,ApxValue *b,ApxValue *c){
     }
     if(op>=50&&op<=53){
         require_kind(a,VARRAY);
-        if(op==50){int64_t n=integer(b);return apx_variant(n>=0&&(uint64_t)n<a->length?"some":"none",n>=0&&(uint64_t)n<a->length?a->items[n]:NULL);}
-        if(op==51){int64_t n=integer(b);if(n<0||(uint64_t)n>=a->length)bounds();ApxValue *out=apx_array_new((int64_t)a->length);memcpy(out->items,a->items,a->length*sizeof *out->items);out->items[n]=c;return out;}
-        if(op==52){int64_t count=integer(c);size_t start=checked_start(a->length,integer(b),count);ApxValue *out=apx_array_new(count);memcpy(out->items,a->items+start,(size_t)count*sizeof *out->items);return out;}
-        require_kind(b,VARRAY);size_check((int64_t)a->length+(int64_t)b->length,sizeof(ApxValue*));ApxValue *out=apx_array_new((int64_t)(a->length+b->length));memcpy(out->items,a->items,a->length*sizeof *out->items);memcpy(out->items+a->length,b->items,b->length*sizeof *out->items);return out;
+        if(op==50){int64_t n=integer(b);return apx_variant(n>=0&&(uint64_t)n<a->length?"some":"none",n>=0&&(uint64_t)n<a->length?array_item(a,(size_t)n):NULL);}
+        if(op==51){
+            int64_t n=integer(b);if(n<0||(uint64_t)n>=a->length)bounds();
+            ApxValue *out=a->integer&&c&&c->kind==VINT?apx_array_i64_new((int64_t)a->length):apx_array_new((int64_t)a->length);
+            if(out->integer){memcpy(out->members.i64,a->members.i64,a->length*sizeof(int64_t));out->members.i64[n]=c->integer;}
+            else {
+                if(!a->integer)memcpy(out->items,a->items,a->length*sizeof *out->items);
+                else for(size_t i=0;i<a->length;i++)out->items[i]=array_item(a,i);
+                out->items[n]=c;
+            }
+            return out;
+        }
+        if(op==52){
+            int64_t count=integer(c);size_t start=checked_start(a->length,integer(b),count);
+            ApxValue *out=a->integer?apx_array_i64_new(count):apx_array_new(count);
+            if(a->integer){if(count)memcpy(out->members.i64,a->members.i64+start,(size_t)count*sizeof(int64_t));}
+            else if(count)memcpy(out->items,a->items+start,(size_t)count*sizeof *out->items);
+            return out;
+        }
+        require_kind(b,VARRAY);size_check((int64_t)a->length+(int64_t)b->length,sizeof(ApxValue*));
+        ApxValue *out=a->integer&&b->integer?apx_array_i64_new((int64_t)(a->length+b->length)):apx_array_new((int64_t)(a->length+b->length));
+        if(out->integer){
+            if(a->length)memcpy(out->members.i64,a->members.i64,a->length*sizeof(int64_t));
+            if(b->length)memcpy(out->members.i64+a->length,b->members.i64,b->length*sizeof(int64_t));
+        } else {
+            if(!a->integer){if(a->length)memcpy(out->items,a->items,a->length*sizeof *out->items);}
+            else for(size_t i=0;i<a->length;i++)out->items[i]=array_item(a,i);
+            if(!b->integer){if(b->length)memcpy(out->items+a->length,b->items,b->length*sizeof *out->items);}
+            else for(size_t i=0;i<b->length;i++)out->items[a->length+i]=array_item(b,i);
+        }
+        return out;
     }
     apx_trap("invalid pure-library opcode");return NULL;
 }
@@ -420,17 +559,7 @@ ApxValue *apx_builtin(int32_t op, ApxValue *a, ApxValue *b) {
     if(op>=30&&op<=54)return pure_builtin(op,a,b,NULL);
     if (op >= 1 && op <= 5) {
         if (a && b && a->kind == VINT && b->kind == VINT) {
-            int64_t x = a->integer, y = b->integer, z = 0;
-            switch (op) {
-            case 1: if (__builtin_add_overflow(x,y,&z)) overflow(); break;
-            case 2: if (__builtin_sub_overflow(x,y,&z)) overflow(); break;
-            case 3: if (__builtin_mul_overflow(x,y,&z)) overflow(); break;
-            case 4: case 5:
-                if (!y) zero();
-                if (x == INT64_MIN && y == -1) overflow();
-                z = op == 4 ? x/y : x%y; break;
-            }
-            return apx_int(z);
+            return apx_int(apx_i64_checked(op, a->integer, b->integer));
         }
         if (a && b && a->kind == VFLOAT && b->kind == VFLOAT) {
             double x=a->real,y=b->real;
@@ -475,18 +604,31 @@ ApxValue *apx_builtin(int32_t op, ApxValue *a, ApxValue *b) {
         if(a->length>=a->capacity)fail("R301","runtime","builder_capacity_exceeded","builder capacity exceeded");
         size_check((int64_t)a->length+1,sizeof(ApxValue*));
         ApxValue *out=value(VBUILDER);out->length=a->length+1;out->capacity=a->capacity;
-        struct BuilderBlock *tail=a->members.builder_tail;
+        struct BuilderBlock *tail;
+        if (a->integer) {
+            /* Defensive persistent boundary for C callers. The compiler never
+             * sends a private builder to an ordinary push. */
+            tail = NULL;
+            if (a->length) {
+                tail=allocate(sizeof *tail+a->length*sizeof *tail->items);
+                tail->prefix_length=0;tail->used=tail->capacity=a->length;
+                ApxValue **items=builder_items(a);
+                memcpy(tail->items,items,a->length*sizeof *items);
+            }
+        } else tail=a->members.builder_tail;
+        struct BuilderBlock *previous=tail;
         if(!tail || tail->used>=tail->capacity || a->length<tail->prefix_length ||
             a->length-tail->prefix_length!=tail->used){
             size_t remaining=a->capacity-a->length;
             size_t capacity=remaining<APX_BUILDER_BLOCK_CAPACITY?remaining:APX_BUILDER_BLOCK_CAPACITY;
             tail=allocate(sizeof *tail+capacity*sizeof *tail->items);
-            tail->previous=a->members.builder_tail;tail->prefix_length=a->length;tail->capacity=capacity;
+            tail->previous=previous;tail->prefix_length=a->length;tail->capacity=capacity;
         }
         tail->items[tail->used++]=b;out->members.builder_tail=tail;return out;
     }
     if(op==21) {
         if(!a || a->kind!=VBUILDER)fail("T101","type","type_mismatch","finish expects builder");
+        if (a->integer) return private_i64_finish(a);
         ApxValue *out=value(VARRAY);out->length=a->length;out->items=builder_items(a);return out;
     }
     if(op==22 || op==23) {
@@ -509,7 +651,7 @@ ApxValue *apx_builtin(int32_t op, ApxValue *a, ApxValue *b) {
 
 /* Strict bounded JSON parser; no source/AST decoding occurs in the executable. */
 struct Parser { const char *p,*end; unsigned depth,maximum_depth; };
-static void skip(struct Parser *p) { while(p->p<p->end && strchr(" \t\r\n",*p->p))p->p++; }
+static void skip(struct Parser *p) { while(p->p<p->end && (*p->p==' '||*p->p=='\t'||*p->p=='\r'||*p->p=='\n'))p->p++; }
 static void invalid_json(void){fail("A103","abi_input","invalid_json","invalid input JSON");}
 static int valid_utf8(const unsigned char *s,size_t n){
     for(size_t i=0;i<n;){unsigned c=s[i++],cp,need,min;
@@ -536,9 +678,20 @@ static ApxValue *parse_string(struct Parser *p){
     if(p->p>=p->end||*p->p++!='"')invalid_json();
     /* Reserve only this string's remaining byte length; decoded JSON escapes
      * cannot expand beyond their source bytes. All allocations are quota checked. */
-    const char *start=p->p,*q=start;int escaped=0;
-    while(q<p->end){char c=*q++;if(!escaped&&c=='"')break;if(!escaped&&c=='\\')escaped=1;else escaped=0;}
-    if(q>p->end||q==start||q[-1]!='"')invalid_json();
+    const char *start=p->p,*q=start;int escaped=0,plain=1,nonascii=0,control=0,closed=0;
+    while(q<p->end){unsigned char c=(unsigned char)*q++;
+        if(!escaped&&c=='"'){closed=1;break;}
+        if(c=='\\')plain=0;
+        if(c>=0x80)nonascii=1;
+        if(c<0x20)control=1;
+        if(!escaped&&c=='\\')escaped=1;else escaped=0;
+    }
+    if(!closed)invalid_json();
+    if(plain){
+        size_t length=(size_t)(q-start)-1;
+        if(control||(nonascii&&!valid_utf8((const unsigned char*)start,length)))invalid_json();
+        ApxValue *v=apx_string(start,(int64_t)length);p->p=q;return v;
+    }
     char *out=allocate((size_t)(q-start)+1);size_t n=0;
     while(p->p<p->end){unsigned char c=(unsigned char)*p->p++;
         if(c=='"'){if(!valid_utf8((const unsigned char*)out,n))invalid_json();ApxValue *v=value(VSTR);v->text=out;v->length=n;return v;}
@@ -551,6 +704,21 @@ static ApxValue *parse_string(struct Parser *p){
         else if(c=='u'){unsigned cp=hex4(p);if(cp>=0xd800&&cp<=0xdbff){if(p->end-p->p<2||p->p[0]!='\\'||p->p[1]!='u')invalid_json();p->p+=2;unsigned low=hex4(p);if(low<0xdc00||low>0xdfff)invalid_json();cp=0x10000+((cp-0xd800)<<10)+(low-0xdc00);}else if(cp>=0xdc00&&cp<=0xdfff)invalid_json();utf8(out,&n,cp);}
         else invalid_json();
     }invalid_json();return NULL;
+}
+/* Called only after the strict grammar scan. Accumulate unsigned magnitude so
+ * MIN never negates a signed value outside its range. Long/overflowing tokens
+ * keep the existing finite-double/raw-integer-text fallback below. */
+static int json_i64(const char *start,const char *end,int64_t *out){
+    int negative=*start=='-';const char *p=start+negative;
+    if(end-p>19)return 0;
+    uint64_t n=0;
+    for(;p<end;p++){
+        unsigned d=(unsigned)(*p-'0');
+        if(n>UINT64_C(922337203685477580)||(n==UINT64_C(922337203685477580)&&d>7u+(unsigned)negative))return 0;
+        n=n*10+d;
+    }
+    *out=negative?(n==(UINT64_C(1)<<63)?INT64_MIN:-(int64_t)n):(int64_t)n;
+    return 1;
 }
 static ApxValue *parse_json(struct Parser *p){
     skip(p);if(++p->depth>p->maximum_depth)fail("A103","abi_input","type_nesting_limit_exceeded","JSON nesting exceeds its bounded parser budget");
@@ -576,8 +744,9 @@ static ApxValue *parse_json(struct Parser *p){
         if(*p->p=='0')p->p++;else while(p->p<p->end&&isdigit((unsigned char)*p->p))p->p++;
         int floating=0;if(p->p<p->end&&*p->p=='.'){floating=1;p->p++;if(p->p>=p->end||!isdigit((unsigned char)*p->p))invalid_json();while(p->p<p->end&&isdigit((unsigned char)*p->p))p->p++;}
         if(p->p<p->end&&(*p->p=='e'||*p->p=='E')){floating=1;p->p++;if(p->p<p->end&&(*p->p=='+'||*p->p=='-'))p->p++;if(p->p>=p->end||!isdigit((unsigned char)*p->p))invalid_json();while(p->p<p->end&&isdigit((unsigned char)*p->p))p->p++;}
-        char *text=copy_bytes(start,(size_t)(p->p-start));char *end;errno=0;int64_t n=strtoll(text,&end,10);
-        if(!floating&&!errno&&!*end)out=apx_int(n);else {errno=0;double d=strtod(text,&end);if((errno&&errno!=ERANGE)||*end||!isfinite(d))fail("A103","abi_input","numeric_out_of_range","number out of range");out=apx_float(d);if(!floating)out->text=text;}
+        int64_t n;
+        if(!floating&&json_i64(start,p->p,&n))out=apx_int(n);
+        else {char *text=copy_bytes(start,(size_t)(p->p-start)),*end;errno=0;double d=strtod(text,&end);if((errno&&errno!=ERANGE)||*end||!isfinite(d))fail("A103","abi_input","numeric_out_of_range","number out of range");out=apx_float(d);if(!floating)out->text=text;}
     }
     p->depth--;return out;
 }
@@ -593,7 +762,7 @@ static ApxValue *validate_value(ApxValue *schema,ApxValue *input,unsigned depth)
     if(!strcmp(kind,"f64")){if(input->kind==VINT)return apx_float((double)input->integer);if(input->kind!=VFLOAT||!isfinite(input->real))fail("A103","abi_input","numeric_out_of_range","expected finite f64");return input->text?apx_float(input->real):input;}
     if(!strcmp(kind,"bool")){if(input->kind!=VBOOL)fail("A103","abi_input","type_mismatch","expected bool");return input;}
     if(!strcmp(kind,"str")){if(input->kind!=VSTR)fail("A103","abi_input","type_mismatch","expected str");return input;}
-    if(!strcmp(kind,"array")){if(input->kind!=VARRAY)fail("A103","abi_input","type_mismatch","expected array");ApxValue *items=apx_array_new((int64_t)input->length);ApxValue *inner=find_field(schema,"items");if(!inner)fail("R999","runtime","trap","invalid array schema");for(size_t i=0;i<input->length;i++)items->items[i]=validate_value(inner,input->items[i],depth+1);return items;}
+    if(!strcmp(kind,"array")){if(input->kind!=VARRAY)fail("A103","abi_input","type_mismatch","expected array");ApxValue *items=apx_array_new((int64_t)input->length);ApxValue *inner=find_field(schema,"items");if(!inner)fail("R999","runtime","trap","invalid array schema");for(size_t i=0;i<input->length;i++)items->items[i]=validate_value(inner,array_item(input,i),depth+1);return items;}
     if(!strcmp(kind,"option")||!strcmp(kind,"result")){
         int option=!strcmp(kind,"option");
         if(input->kind!=VRECORD)fail("A103","abi_input","type_mismatch","expected tagged map value");
@@ -623,6 +792,80 @@ static ApxValue *validate_value(ApxValue *schema,ApxValue *input,unsigned depth)
 }
 ApxValue *apx_validate(const char *schema,ApxValue *input){ApxValue *type=parse_bounded(schema,strlen(schema),GENERATED_SCHEMA_DEPTH);if(type->kind==VNULL)return input;return validate_value(type,input,0);}
 
+/* Static schemas mirror validate_value's traversal and diagnostics. In
+ * particular, validate all declared fields before searching extras, and retain
+ * the old strcmp extra selection (including embedded-NUL ties). No schema
+ * objects, parsing, caches or mutable descriptor state are needed here. */
+static ApxValue *validate_static_value(const ApxSchema *s,ApxValue *input,unsigned depth){
+    if(depth>VALUE_TYPE_DEPTH)fail("A103","abi_input","type_nesting_limit_exceeded","input type nesting exceeds 64");
+    if(!s || s->kind>APX_SCHEMA_STRUCT)apx_trap("invalid static schema");
+    if(s->kind==APX_SCHEMA_NULL)return input;
+    if(!input)apx_trap("invalid static schema input");
+    switch(s->kind){
+    case APX_SCHEMA_I64:
+        if(input->kind!=VINT)fail("A103","abi_input","numeric_out_of_range","expected i64");
+        return input;
+    case APX_SCHEMA_F64:
+        if(input->kind==VINT)return apx_float((double)input->integer);
+        if(input->kind!=VFLOAT||!isfinite(input->real))fail("A103","abi_input","numeric_out_of_range","expected finite f64");
+        return input->text?apx_float(input->real):input;
+    case APX_SCHEMA_BOOL:
+        if(input->kind!=VBOOL)fail("A103","abi_input","type_mismatch","expected bool");
+        return input;
+    case APX_SCHEMA_STR:
+        if(input->kind!=VSTR)fail("A103","abi_input","type_mismatch","expected str");
+        return input;
+    case APX_SCHEMA_ARRAY: {
+        if(input->kind!=VARRAY)fail("A103","abi_input","type_mismatch","expected array");
+        if(!s->item)apx_trap("invalid static array schema");
+        ApxValue *out=apx_array_new((int64_t)input->length);
+        for(size_t i=0;i<input->length;i++)out->items[i]=validate_static_value(s->item,array_item(input,i),depth+1);
+        return out;
+    }
+    case APX_SCHEMA_OPTION: case APX_SCHEMA_RESULT: {
+        int option=s->kind==APX_SCHEMA_OPTION;
+        if(input->kind!=VRECORD)fail("A103","abi_input","type_mismatch","expected tagged map value");
+        ApxValue *tag=find_field(input,"tag");
+        if(!tag||tag->kind!=VSTR||strlen(tag->text)!=tag->length)fail("A103","abi_input","type_mismatch","invalid map value tag");
+        int first=!strcmp(tag->text,option?"some":"ok"),second=!strcmp(tag->text,option?"none":"err");
+        if(!first&&!second)fail("A103","abi_input","type_mismatch","invalid map value tag");
+        if(option&&second){if(input->length!=1)fail("A103","abi_input","type_mismatch","none has no payload");return apx_variant("none",NULL);}
+        ApxValue *payload=find_field(input,first?"value":"error");
+        const ApxSchema *inner=option||first?s->item:s->error;
+        if(input->length!=2||!payload)fail("A103","abi_input","type_mismatch","invalid tagged map value payload");
+        if(!inner)apx_trap("invalid static tagged schema");
+        return apx_variant(option?"some":first?"ok":"err",validate_static_value(inner,payload,depth+1));
+    }
+    case APX_SCHEMA_MAP: {
+        if(input->kind!=VRECORD)fail("A103","abi_input","type_mismatch","expected map object");
+        if(!s->item)apx_trap("invalid static map schema");
+        ApxValue *out=map_new(input->length);struct MapEntry *entries=allocate(input->length*sizeof *entries);
+        for(size_t i=0;i<input->length;i++){entries[i].key=input->members.names[i];entries[i].length=key_length(input,i);entries[i].item=input->items[i];}
+        qsort(entries,input->length,sizeof *entries,entry_compare);
+        for(size_t i=0;i<input->length;i++){out->members.names[i]=entries[i].key;out->key_lengths[i]=entries[i].length;out->items[i]=validate_static_value(s->item,entries[i].item,depth+1);}
+        return out;
+    }
+    case APX_SCHEMA_STRUCT: {
+        if(input->kind!=VRECORD)fail("A103","abi_input","type_mismatch","expected object");
+        if(!s->name || s->count>APX_MEMORY/sizeof(ApxSchemaField) || (s->count&&!s->fields))apx_trap("invalid static struct schema");
+        ApxValue *out=apx_record_new(s->name,(int64_t)s->count);
+        for(size_t i=0;i<s->count;i++){
+            const ApxSchemaField *f=&s->fields[i];
+            if(!f->name||!f->type)apx_trap("invalid static struct field");
+            ApxValue *v=find_field(input,f->name);
+            if(!v){char msg[256];snprintf(msg,sizeof msg,"missing field `%s`",f->name);fail("A101","abi_input","missing_field",msg);}
+            out->members.names[i]=f->name;out->items[i]=validate_static_value(f->type,v,depth+1);
+        }
+        const char *extra=NULL;
+        for(size_t i=0;i<input->length;i++)if(!find_key(out,input->members.names[i],key_length(input,i))&&(!extra||strcmp(input->members.names[i],extra)<0))extra=input->members.names[i];
+        if(extra){char msg[256];snprintf(msg,sizeof msg,"extra field `%s`",extra);fail("A102","abi_input","extra_field",msg);}
+        return out;
+    }
+    default: apx_trap("invalid static schema");return NULL;
+    }
+}
+ApxValue *apx_validate_static(const ApxSchema *schema,ApxValue *input){return validate_static_value(schema,input,0);}
+
 /* Deterministic compact output; quota measured before publication. */
 struct Output { char *text;size_t length,capacity; };
 static void put(struct Output *o,const char *text,size_t n){
@@ -631,14 +874,32 @@ static void put(struct Output *o,const char *text,size_t n){
     memcpy(o->text+o->length,text,n);o->length+=n;o->text[o->length]=0;
 }
 static void literal(struct Output *o,const char *s){put(o,s,strlen(s));}
-static void quoted(struct Output *o,const char *s,size_t n){literal(o,"\"");for(size_t i=0;i<n;i++){unsigned char c=(unsigned char)s[i];if(c=='"')literal(o,"\\\"");else if(c=='\\')literal(o,"\\\\");else if(c=='\n')literal(o,"\\n");else if(c=='\r')literal(o,"\\r");else if(c=='\t')literal(o,"\\t");else if(c=='\b')literal(o,"\\b");else if(c=='\f')literal(o,"\\f");else if(c<32){char b[7];snprintf(b,sizeof b,"\\u%04x",c);literal(o,b);}else put(o,(const char*)&c,1);}literal(o,"\"");}
+static void quoted(struct Output *o,const char *s,size_t n){
+    literal(o,"\"");size_t start=0;
+    for(size_t i=0;i<n;i++){
+        unsigned char c=(unsigned char)s[i];
+        if(c>=32&&c!='"'&&c!='\\')continue;
+        if(i>start)put(o,s+start,i-start);
+        if(c=='"')literal(o,"\\\"");else if(c=='\\')literal(o,"\\\\");else if(c=='\n')literal(o,"\\n");else if(c=='\r')literal(o,"\\r");else if(c=='\t')literal(o,"\\t");else if(c=='\b')literal(o,"\\b");else if(c=='\f')literal(o,"\\f");else {char b[7];snprintf(b,sizeof b,"\\u%04x",c);literal(o,b);}
+        start=i+1;
+    }
+    if(n>start)put(o,s+start,n-start);
+    literal(o,"\"");
+}
+static void json_integer(struct Output *o,int64_t integer){
+    char digits[20],*end=digits+sizeof digits,*p=end;
+    uint64_t magnitude=integer<0?UINT64_C(0)-(uint64_t)integer:(uint64_t)integer;
+    do{*--p=(char)('0'+magnitude%10);magnitude/=10;}while(magnitude);
+    if(integer<0)*--p='-';
+    put(o,p,(size_t)(end-p));
+}
 static void encode(struct Output *o,ApxValue *v,unsigned depth){
     if(depth>APX_DEPTH)fail("R205","runtime","recursion_limit_exceeded","output value nesting too deep");
     if(!v){literal(o,"null");return;}char number[96];
     switch(v->kind){
     case VNULL:literal(o,"null");break;
     case VBOOL:literal(o,v->integer?"true":"false");break;
-    case VINT:snprintf(number,sizeof number,"%"PRId64,v->integer);literal(o,number);break;
+    case VINT:json_integer(o,v->integer);break;
     case VFLOAT:
         if(v->text){literal(o,v->text);break;}
         if(!isfinite(v->real)){literal(o,"null");break;}
@@ -652,7 +913,7 @@ static void encode(struct Output *o,ApxValue *v,unsigned depth){
         if(!strchr(number,'.')&&!strchr(number,'e')&&!strchr(number,'E'))literal(o,".0");
         break;
     case VSTR:quoted(o,v->text,v->length);break;
-    case VARRAY:literal(o,"[");for(size_t i=0;i<v->length;i++){if(i)literal(o,",");encode(o,v->items[i],depth+1);}literal(o,"]");break;
+    case VARRAY:literal(o,"[");for(size_t i=0;i<v->length;i++){ApxValue scratch;if(i)literal(o,",");encode(o,array_read(v,i,&scratch),depth+1);}literal(o,"]");break;
     case VRECORD:{literal(o,"{");size_t *order=allocate(v->length*sizeof *order);for(size_t i=0;i<v->length;i++)order[i]=i;for(size_t i=1;i<v->length;i++){size_t k=order[i],j=i;while(j&&key_compare(v->members.names[order[j-1]],key_length(v,order[j-1]),v->members.names[k],key_length(v,k))>0){order[j]=order[j-1];j--;}order[j]=k;}
         for(size_t i=0;i<v->length;i++){size_t k=order[i];if(i)literal(o,",");quoted(o,v->members.names[k],key_length(v,k));literal(o,":");encode(o,v->items[k],depth+1);}literal(o,"}");break;}
     case VMAP:literal(o,"{");for(size_t i=0;i<v->length;i++){if(i)literal(o,",");quoted(o,v->members.names[i],key_length(v,i));literal(o,":");encode(o,v->items[i],depth+1);}literal(o,"}");break;
@@ -679,7 +940,17 @@ char *apx_json_encode(ApxValue *v){
     return text;
 }
 ApxValue *apx_json_get(ApxValue *v,const char *name){return find_field(v,name);}
-ApxValue *apx_json_item(ApxValue *v,size_t i){return v&&v->kind==VARRAY&&i<v->length?v->items[i]:NULL;}
+ApxValue *apx_json_item(ApxValue *v,size_t i){
+    if (!v || v->kind != VARRAY || i >= v->length) return NULL;
+    if (!v->integer || (v->items && v->items[i])) return v->items[i];
+    /* This public accessor previously could not fail. Packed compatibility
+     * boxing can exhaust storage: contain it locally, never jump through a
+     * caller's expired setjmp frame. Successfully returned boxes live to reset. */
+    jmp_buf local; jmp_buf *previous=trap_target; ApxValue *volatile result=NULL;
+    trap_target=&local;
+    if (!setjmp(local)) result=array_item(v,i);
+    trap_target=previous; return result;
+}
 int apx_json_kind(ApxValue *v){return v?(v->kind==VMAP?6:(int)v->kind):-1;}
 const char *apx_json_string(ApxValue *v){return v&&v->kind==VSTR?v->text:NULL;}
 size_t apx_json_length(ApxValue *v){return v?v->length:0;}

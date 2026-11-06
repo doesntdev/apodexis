@@ -86,6 +86,41 @@ $(BUILD)/test-authoring-syntax: tests/test_authoring_syntax.c $(FRONTEND) $(HEAD
 $(BUILD)/test-authoring-native: tests/test_authoring_native.c $(BUILD)/apx_json.o
 	$(CC) $(CFLAGS) tests/test_authoring_native.c $(BUILD)/apx_json.o -o $@
 
+$(BUILD)/test-native-scalars: tests/test_native_scalars.c $(FRONTEND) $(HEADERS) runtime/apx_runtime.c
+	$(CC) $(CFLAGS) -Icompiler tests/test_native_scalars.c $(FRONTEND) -o $@
+
+$(BUILD)/test-native-collections: tests/test_native_collections.c $(FRONTEND) $(HEADERS) runtime/apx_runtime.c
+	$(CC) $(CFLAGS) -Icompiler tests/test_native_collections.c $(FRONTEND) -o $@
+
+.PHONY: test-native-calls
+.PHONY: test-native-json
+$(BUILD)/test-native-json: tests/test_native_json.c $(FRONTEND) $(HEADERS) runtime/apx_runtime.c
+	$(CC) $(CFLAGS) -Icompiler tests/test_native_json.c $(FRONTEND) -o $@
+
+test-native-json: all $(BUILD)/test-native-json
+	$(BUILD)/test-native-json
+
+$(BUILD)/test-native-calls: tests/test_native_calls.c $(FRONTEND) $(HEADERS) runtime/apx_runtime.c
+	$(CC) $(CFLAGS) -Icompiler tests/test_native_calls.c $(FRONTEND) -o $@
+
+test-native-calls: all $(BUILD)/test-native-calls
+	$(BUILD)/test-native-calls
+
+.PHONY: test-native-shapes
+$(BUILD)/test-native-shapes: tests/test_native_shapes.c $(FRONTEND) $(HEADERS) runtime/apx_runtime.c
+	$(CC) $(CFLAGS) -Icompiler tests/test_native_shapes.c $(FRONTEND) -o $@
+
+test-native-shapes: all $(BUILD)/test-native-shapes
+	$(BUILD)/test-native-shapes
+
+.PHONY: test-native-collections
+test-native-collections: all $(BUILD)/test-native-collections
+	$(BUILD)/test-native-collections
+
+.PHONY: test-native-scalars
+test-native-scalars: all $(BUILD)/test-native-scalars
+	$(BUILD)/test-native-scalars
+
 $(BUILD)/test-pure-libraries: tests/test_pure_libraries.c $(FRONTEND) $(HEADERS) $(BUILD)/apx_json.o
 	$(CC) $(CFLAGS) -Icompiler tests/test_pure_libraries.c $(FRONTEND) $(BUILD)/apx_json.o -o $@
 
@@ -105,6 +140,16 @@ $(BUILD)/test-reference-programs: tests/test_reference_programs.c $(BUILD)/apx_j
 	$(CC) $(CFLAGS) tests/test_reference_programs.c $(BUILD)/apx_json.o -o $@
 
 test-sanitize: all
+	$(CC) $(CFLAGS) -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined -Icompiler tests/test_native_json.c $(FRONTEND) -o $(BUILD)/test-native-json-sanitized
+	ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 UBSAN_OPTIONS=halt_on_error=1 $(BUILD)/test-native-json-sanitized
+	$(CC) $(CFLAGS) -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined -Icompiler tests/test_native_calls.c $(FRONTEND) -o $(BUILD)/test-native-calls-sanitized
+	ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 UBSAN_OPTIONS=halt_on_error=1 $(BUILD)/test-native-calls-sanitized
+	$(CC) $(CFLAGS) -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined -Icompiler tests/test_native_shapes.c $(FRONTEND) -o $(BUILD)/test-native-shapes-sanitized
+	ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 UBSAN_OPTIONS=halt_on_error=1 $(BUILD)/test-native-shapes-sanitized
+	$(CC) $(CFLAGS) -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined -Icompiler tests/test_native_collections.c $(FRONTEND) -o $(BUILD)/test-native-collections-sanitized
+	ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 UBSAN_OPTIONS=halt_on_error=1 $(BUILD)/test-native-collections-sanitized
+	$(CC) $(CFLAGS) -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined -Icompiler tests/test_native_scalars.c $(FRONTEND) -o $(BUILD)/test-native-scalars-sanitized
+	ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 UBSAN_OPTIONS=halt_on_error=1 $(BUILD)/test-native-scalars-sanitized
 	$(CC) $(CFLAGS) -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined tests/test_runtime_memory.c -o $(BUILD)/test-runtime-memory-sanitized
 	ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 UBSAN_OPTIONS=halt_on_error=1 $(BUILD)/test-runtime-memory-sanitized
 	$(CC) $(CFLAGS) -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined -DAPX_LIBRARY_ONLY tests/test_support.c compiler/apx_hash.c runtime/apx_runtime.c -o $(BUILD)/test-support-sanitized
@@ -122,11 +167,16 @@ test-sanitize: all
 	$(CC) $(CFLAGS) -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined -DAPX_LIBRARY_ONLY -Icompiler tests/test_pure_libraries.c $(FRONTEND) runtime/apx_runtime.c -o $(BUILD)/test-pure-libraries-sanitized
 	ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 UBSAN_OPTIONS=halt_on_error=1 $(BUILD)/test-pure-libraries-sanitized
 
-test: all test-support test-memory $(BUILD)/test-conformance $(BUILD)/test-mcp $(BUILD)/test-regressions $(BUILD)/test-sandbox $(BUILD)/test-unicode $(BUILD)/test-frontend $(BUILD)/test-diagnostics $(BUILD)/test-diagnostic-transport $(BUILD)/test-authoring-syntax $(BUILD)/test-authoring-native $(BUILD)/test-reference-programs $(BUILD)/test-authoring-mcp $(BUILD)/test-pure-libraries $(BUILD)/test-modules $(BUILD)/test-host $(BUILD)/test-application-foundation
+test: all test-support test-memory $(BUILD)/test-native-json $(BUILD)/test-native-calls $(BUILD)/test-native-shapes $(BUILD)/test-native-collections $(BUILD)/test-native-scalars $(BUILD)/test-conformance $(BUILD)/test-mcp $(BUILD)/test-regressions $(BUILD)/test-sandbox $(BUILD)/test-unicode $(BUILD)/test-frontend $(BUILD)/test-diagnostics $(BUILD)/test-diagnostic-transport $(BUILD)/test-authoring-syntax $(BUILD)/test-authoring-native $(BUILD)/test-reference-programs $(BUILD)/test-authoring-mcp $(BUILD)/test-pure-libraries $(BUILD)/test-modules $(BUILD)/test-host $(BUILD)/test-application-foundation
+	$(BUILD)/test-native-json
+	$(BUILD)/test-native-calls
+	$(BUILD)/test-native-shapes
 	$(BUILD)/test-pure-libraries
 	$(BUILD)/test-modules
 	$(BUILD)/test-host
 	$(BUILD)/test-application-foundation
+	$(BUILD)/test-native-collections
+	$(BUILD)/test-native-scalars
 	$(BUILD)/test-authoring-mcp
 	$(BUILD)/test-reference-programs
 	$(BUILD)/test-authoring-syntax
