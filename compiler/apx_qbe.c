@@ -267,6 +267,8 @@ static char *expression(FunctionEmitter *f, ApxExpr *e) {
     }
     if (e->opcode==17 && e->type->kind==APX_I64)
         return call2(f,"$apx_array_i64_at",'l',values[0],values[1]);
+    if (e->opcode==17)
+        return unbox(f,e->type,call2(f,"$apx_at_raw",'l',values[0],values[1]));
     if (e->opcode==20 && e->args->expr->kind==APX_VAR_EXPR &&
         f->private_builders[e->args->expr->binding]==1)
         return call2(f,"$apx_builder_i64_private_push",'l',values[0],values[1]);

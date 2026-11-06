@@ -141,10 +141,14 @@ wrapper validates input before unboxing a scalar parameter and boxes a scalar
 answer. Scalars are explicitly boxed at generic builtin, record, variant and
 host-operation boundaries, then checked and unboxed on scalar reads and match
 payloads. Typed i64 literals and proven private i64 builders instead write raw
-integers; typed `E` and index reads accept both packed and legacy boxed arrays
-without allocating scalar boxes. Float/bool/string arrays and operations retain
-their existing representations. Checked named-record reads use declaration-order
-positions, as described below.
+integers; typed `E` and index reads accept both packed and legacy boxed i64
+arrays without allocating scalar boxes. Checked non-i64 index reads pass the raw
+`i64` index directly to the existing `apx_at_raw` bounds-checked accessor, then
+use the existing typed unboxing (`bool` to QBE `w`; pointer-valued results remain
+pointers). Array and index operands still execute once in textual order before
+the read; bounds errors and fuel/depth checks retain their existing points.
+Float/bool/string arrays retain their existing value representations. Checked
+named-record reads use declaration-order positions, as described below.
 
 Statement/loop fuel charges and logical function enter/leave checks remain at
 their existing points, with no batching. Small scalar leaf helpers may be

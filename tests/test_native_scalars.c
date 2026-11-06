@@ -26,7 +26,7 @@ int main(void){
     for(size_t i=0;i<sizeof counts/sizeof counts[0];i++){
         size_t bytes=observe(counts[i]);
         if(!i)first=bytes;
-        else require(bytes==first,"scalar-only loop allocation is independent of iteration count");
+        else require(bytes==first,"scalar/bool-index loop allocation is independent of iteration count");
     }
     reset_memory();require(!arena_chunks&&!memory_used,"linked arena cleanup");
     printf("linked native scalars: %u checks PASS\n",checks);return 0;
@@ -48,8 +48,8 @@ static void cleanup(void){
 static const char *numeric=
     "M scalars\nF step x:i64 enabled:bool->i64\n  ? enabled\n    R (+ x 1)\n  R x\n"
     "F flip b:bool->bool\n  R (! b)\n"
-    "F main n:i64->i64\n  L i 0\n  L total 0\n  L active true\n"
-    "  W (< i n)\n    S total (step total active)\n    S active (flip (flip active))\n    S i (+ i 1)\n  R total\n";
+    "F main n:i64->i64\n  L i 0\n  L total 0\n  L active true\n  L flags [false true]\n"
+    "  W (< i n)\n    S total (step total (& active flags[1]))\n    S active (flip (flip active))\n    S i (+ i 1)\n  R total\n";
 static void save(const char *path,const char *text){FILE *fp=fopen(path,"wb");require(fp!=NULL,"open fixture");require(fwrite(text,1,strlen(text),fp)==strlen(text)&&!fclose(fp),"save fixture");}
 static char *readall(const char *path){
     FILE *fp=fopen(path,"rb");require(fp!=NULL,"open result");require(!fseek(fp,0,SEEK_END),"seek result");
@@ -104,6 +104,64 @@ static uint64_t native(const char *dir,const char *source,const char *input,cons
     ApxValue *meter=apx_json_get(v,"fuel_used");uint64_t used=0;
     require(meter&&apx_json_unsigned(meter,&used),"exact native fuel field");
     free(text);reset_memory();return used;
+}
+/* Checked indexing has the same raw-index boundary for every supported value
+ * representation; i64 keeps its distinct packed/legacy accessor. */
+static void array_representation(void){
+    static const char *const sources[]={
+        "M read\nF main rows:[bool]->bool\n  R rows[1]\n",
+        "M read\nF main rows:[f64]->f64\n  R (@ rows 1)\n",
+        "M read\nF main rows:[str]->str\n  R rows[1]\n",
+        "M read\nF main rows:[[i64]]->[i64]\n  R rows[1]\n",
+        "M read\nT Row struct\n  flag:bool\nF main rows:[Row]->Row\n  R rows[1]\n",
+        "M read\nF main rows:[map bool]->map bool\n  R rows[1]\n",
+        "M read\nF get rows:[option bool]->option bool\n  R rows[0]\nF main->option bool\n  L rows:[option bool] [(some false)]\n  R (get rows)\n",
+        "M read\nF get rows:[result bool str]->result bool str\n  R rows[0]\nF main->result bool str\n  L rows:[result bool str] [(ok false)]\n  R (get rows)\n",
+        "M read\nF main rows:[i64]->i64\n  R rows[1]\n"
+    };
+    for(size_t i=0;i<sizeof sources/sizeof sources[0];i++){
+        char *il=NULL,*canonical=NULL,*diagnostic=NULL;
+        int code=apx_compile_source(sources[i],&il,&canonical,&diagnostic);
+        if(code)fprintf(stderr,"%s\n",diagnostic);
+        require(!code&&il,"compile checked array read fixture");
+        int packed=i==sizeof sources/sizeof sources[0]-1;
+        require(strstr(il,packed?"$apx_array_i64_at(":"$apx_at_raw(")!=NULL,"checked array read uses existing raw-index accessor");
+        require(!strstr(il,"$apx_builtin(w 17,"),"checked array read avoids generic index dispatch");
+        if(!packed)require(!strstr(il,"$apx_int("),"non-i64 read does not box its index");
+        else require(!strstr(il,"$apx_at_raw("),"packed i64 read retains its exact accessor");
+        if(!i)require(strstr(il,"=w call $apx_truth(l ")!=NULL,"indexed bool unboxes to native word");
+        free(il);free(canonical);free(diagnostic);
+    }
+}
+static void array_semantics(const char *dir){
+    const char *bool_index="M index\nF main i:i64->bool\n  R [false true][i]\n";
+    require(native(dir,bool_index,"0","1000000","false",1)==1,"indexed false remains false");
+    require(native(dir,bool_index,"1","1000000","true",1)==1,"indexed true remains true");
+    static const char *const invalid[]={"-1","-9223372036854775808","2","9223372036854775807"};
+    for(size_t i=0;i<sizeof invalid/sizeof invalid[0];i++)
+        require(native(dir,bool_index,invalid[i],"1000000","index_out_of_bounds",0)==1,"raw bool index retains full signed bounds checks");
+    native(dir,"M empty\nF main rows:[str]->str\n  R rows[0]\n","[]","1000000","index_out_of_bounds",0);
+    native(dir,"M strings\nF main rows:[str]->[str]\n  R [rows[1] (@ rows 0) rows[2]]\n",
+        "[\"a\\u0000b\",\"λ🙂\",\"\"]","1000000","[\"λ🙂\",\"a\\u0000b\",\"\"]",1);
+    native(dir,"M floats\nF main rows:[f64]->[f64]\n  R [rows[1] rows[0]]\n","[-1.5,2.25]","1000000","[2.25,-1.5]",1);
+    native(dir,"M nested\nF main rows:[[i64]]->[[i64]]\n  R [rows[1] rows[0]]\n","[[-9223372036854775808,9223372036854775807],[]]","1000000","[[],[-9223372036854775808,9223372036854775807]]",1);
+    native(dir,"M records\nT Row struct\n  label:str\n  flag:bool\nF main rows:[Row]->Row\n  R rows[1]\n",
+        "[{\"label\":\"first\",\"flag\":true},{\"label\":\"λ\\u0000🙂\",\"flag\":false}]","1000000","{\"label\":\"λ\\u0000🙂\",\"flag\":false}",1);
+    native(dir,"M maps\nF main rows:[map bool]->map bool\n  R rows[1]\n","[{\"a\":true},{\"b\":false}]","1000000","{\"b\":false}",1);
+    native(dir,"M options\nF get rows:[option bool] i:i64->bool\n  C rows[i]\n    some flag\n      R flag\n    none\n      R true\nF main->[bool]\n  L rows:[option bool] [(some false) (some true) (none)]\n  R [(get rows 0) (get rows 1) (get rows 2)]\n","null","1000000","[false,true,true]",1);
+    native(dir,"M results\nF get rows:[result bool str] i:i64->bool\n  C rows[i]\n    ok flag\n      R flag\n    err message\n      R (= message \"bad\\u{0}λ\")\nF main->[bool]\n  L rows:[result bool str] [(ok false) (ok true) (err \"bad\\u{0}λ\")]\n  R [(get rows 0) (get rows 1) (get rows 2)]\n","null","1000000","[false,true,true]",1);
+    /* Both operands must execute exactly once, in textual order, before the
+     * accessor checks bounds. Distinct failure kinds distinguish the winner. */
+    require(native(dir,"M order\nF rows->[bool]\n  Z \"array-first\"\nF index->i64\n  R (/ 1 0)\nF main->bool\n  R (@ (rows) (index))\n","null","1000000","trap",0)==2,"array trap precedes competing index failure");
+    require(native(dir,"M order\nF rows->[bool]\n  R [(= (/ 1 0) 0)]\nF index->i64\n  Z \"index-second\"\nF main->bool\n  R (@ (rows) (index))\n","null","1000000","divide_by_zero",0)==2,"array expression failure precedes index trap");
+    require(native(dir,"M order\nF rows->[bool]\n  R []\nF index->i64\n  Z \"index-before-bounds\"\nF main->bool\n  R (@ (rows) (index))\n","null","1000000","trap",0)==3,"index executes before empty-array bounds check");
+    const char *ordered="M order\nF rows->[bool]\n  R [false true]\nF index->i64\n  R 1\nF main->bool\n  R (@ (rows) (index))\n";
+    require(native(dir,ordered,"null","1000000","true",1)==3,"array and index calls execute once");
+    require(native(dir,ordered,"null","1","fuel_exhausted",0)==1,"fuel before array operand statement");
+    require(native(dir,ordered,"null","2","fuel_exhausted",0)==2,"fuel before index operand statement");
+    require(native(dir,ordered,"null","3","true",1)==3,"raw read adds no semantic fuel charge");
+    native(dir,"M i64\nF main rows:[i64]->i64\n  R rows[1]\n","[-9223372036854775808,9223372036854775807]","1000000","9223372036854775807",1);
+    printf("native indexed array semantics PASS\n");
 }
 static void semantics(const char *dir){
     native(dir,numeric,"0","1000000","0",1);native(dir,numeric,"-2","1000000","0",1);native(dir,numeric,"3","1000000","3",1);
@@ -160,10 +218,11 @@ static void boundaries(const char *dir){
     native(dir,"M host\nF main n:i64->result str str\n  R (random_hex n)\n","4","1000000","{\"tag\":\"err\",\"error\":\"capability_denied\"}",1);
 }
 static void metering(const char *dir){
-    static const unsigned used[]={0,1,2,3,4,4,6,7,8,9,10,11,12,13,14};
+    /* The once-per-entry flags initializer adds exactly one statement charge. */
+    static const unsigned used[]={0,1,2,3,4,5,5,7,8,9,10,11,12,13,14,15};
     for(unsigned i=0;i<sizeof used/sizeof used[0];i++){
         char fuel[32];snprintf(fuel,sizeof fuel,"%u",i);
-        require(native(dir,numeric,"1",fuel,i==14?"1":"fuel_exhausted",i==14)==used[i],"fuel at each helper/loop charge boundary");
+        require(native(dir,numeric,"1",fuel,i==15?"1":"fuel_exhausted",i==15)==used[i],"fuel at each helper/loop charge boundary");
     }
     const char *overflow="M precedence\nF main->i64\n  L x 0\n  R (+ 9223372036854775807 1)\n";
     require(native(dir,overflow,"null","1","fuel_exhausted",0)==1,"fuel precedes overflow in next statement");
@@ -213,7 +272,9 @@ int main(int argc,char **argv){
     require(argc==1||allocation_only,"valid test arguments");
     char *dir=fixture_directory;require(mkdtemp(dir)!=NULL,"owned fixture directory");
     fixture_active=1;require(!atexit(cleanup),"register failure cleanup");
-    runtime_helpers();representation(dir,!allocation_only);
+    runtime_helpers();
+    if(!allocation_only){array_semantics(dir);array_representation();}
+    representation(dir,!allocation_only);
     if(!allocation_only){semantics(dir);arithmetic(dir);boundaries(dir);metering(dir);declared_tests(dir);}
     cleanup();require(!fixture_active,"native fixture cleanup");
     printf("native scalars: %u checks; typed IR/linked allocation/native semantics PASS\n",checks);return 0;
