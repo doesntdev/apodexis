@@ -4428,6 +4428,12 @@
       "category": "host-effect",
       "summary": "str exact_url -> result str str; explicitly allowlisted HTTP(S) GET, no redirects, UTF-8 2xx body.",
       "opcode": 1006
+    },
+    {
+      "name": "json_decode",
+      "category": "pure-library",
+      "summary": "(json_decode T text) -> result T str; concrete JSON input type marker and str evaluated once. Document validation failures, including duplicate fields, return diagnostic kind; resource failures propagate.",
+      "opcode": 55
     }
   ],
   "protocol_schemas": [

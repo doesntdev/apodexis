@@ -93,6 +93,9 @@ struct ApxSchema {
     const ApxSchemaField *fields;
 };
 ApxValue *apx_validate_static(const ApxSchema *schema, ApxValue *input);
+/* Typed language decode. Contains A101/A102/A103 and A104/duplicate_field abi_input failures;
+ * resource/runtime failures propagate. Does not reset caller-owned values. */
+ApxValue *apx_json_decode(const ApxSchema *schema, ApxValue *text);
 /* Safe JSON access used by the standalone compiler/MCP transport. Returned
  * JSON values live until apx_json_reset; encoded strings are caller-owned. */
 ApxValue *apx_json_parse(const char *text, size_t length);

@@ -106,6 +106,9 @@ void apx_fail(ApxContext *ctx, const char *code, const char *phase,
 ApxDecl *apx_find_decl(ApxProgram *program, const char *name);
 ApxFunction *apx_find_function(ApxProgram *program, const char *name);
 int apx_builtin_opcode(const char *name);
+/* Shared JSON ABI eligibility walk, also required by check-only json_decode. */
+void apx_check_json_type(ApxContext *ctx, ApxProgram *program,
+                         ApxType *type, ApxSpan span);
 void apx_metadata_render(ApxContext *context, ApxProgram *program,
                           char **explain_out, char **contract_out, char **pseudocode_out);
 #endif

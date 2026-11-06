@@ -202,6 +202,80 @@ static void recovery(void){
     if(!setjmp(escape)){require(!apx_json_parse("?",1),"nested public parse fails locally");apx_trap("outer");require(0,"outer trap");}
     else require(!strcmp(error_message,"outer"),"public parser restores previous trap target");
 }
+static void decode_terminal(const ApxSchema *schema,ApxValue *text,const char *code,const char *kind,const char *message){
+    jmp_buf outer; jmp_buf *previous=trap_target;trap_target=&outer;
+    if(!setjmp(outer)){(void)apx_json_decode(schema,text);require(0,"decoder terminal failure propagates");}
+    else {
+        require(trap_target==&outer,"decoder restores custom outer trap before rethrow");
+        require(!strcmp(error_code,code)&&!strcmp(error_kind,kind)&&!strcmp(error_phase,"runtime"),"decoder exact terminal diagnostic identity");
+        require(!strcmp(error_message,message),"decoder retains actual terminal diagnostic message");
+    }
+    trap_target=previous;
+}
+static void typed_decoding(void){
+    static const ApxSchema integer_schema={APX_SCHEMA_I64,NULL,0,NULL,NULL,NULL};
+    static const ApxSchema string_schema={APX_SCHEMA_STR,NULL,0,NULL,NULL,NULL};
+    static const ApxSchema array_schema={APX_SCHEMA_ARRAY,NULL,0,&integer_schema,NULL,NULL};
+    static const ApxSchemaField fields[]={{"id",&integer_schema},{"name",&string_schema}};
+    static const ApxSchema row_schema={APX_SCHEMA_STRUCT,"Row",2,NULL,NULL,fields};
+    static const ApxSchema invalid_schema={99,NULL,0,NULL,NULL,NULL};
+    apx_json_reset();
+    ApxValue *stable=apx_string("stable",6),*array=apx_array_i64_new(1);apx_array_i64_put(array,0,7);
+    ApxValue *builder=apx_builtin(19,apx_int(2),NULL);builder=apx_builtin(20,builder,apx_int(3));ApxValue *alias=apx_builtin(21,builder,NULL);
+    ApxValue *map=apx_builtin3(45,apx_builtin(43,NULL,NULL),apx_string("a",1),apx_int(9));
+    ApxValue *good=apx_string("17",2),*bad=apx_string("[",1),*row=apx_string("{\"name\":\"é\\u0000😀\",\"id\":1}",(int64_t)strlen("{\"name\":\"é\\u0000😀\",\"id\":1}"));
+    jmp_buf outer; jmp_buf *previous=trap_target; trap_target=&outer;
+    if(setjmp(outer)){fprintf(stderr,"unexpected typed decode trap %s %s\n",error_code,error_message);exit(1);}
+    fuel_used=73;call_depth=5;size_t before=memory_used;
+    ApxValue *first=apx_json_decode(&row_schema,row);encoded(first,"{\"tag\":\"ok\",\"value\":{\"id\":1,\"name\":\"é\\u0000😀\"}}");
+    encoded(apx_json_decode(&integer_schema,bad),"{\"tag\":\"err\",\"error\":\"invalid_json\"}");
+    require(trap_target==&outer,"decoder restores custom trap on contained document failure");
+    const char *duplicates[]={"{\"id\":1,\"id\":2}","{\"id\":1,\"\\u0069d\":2}"};
+    for(size_t i=0;i<sizeof duplicates/sizeof duplicates[0];i++){
+        encoded(apx_json_decode(&row_schema,apx_string(duplicates[i],(int64_t)strlen(duplicates[i]))),"{\"tag\":\"err\",\"error\":\"duplicate_field\"}");
+        require(trap_target==&outer,"duplicate-field recovery restores the caller trap");
+    }
+    encoded(apx_json_decode(&integer_schema,good),"{\"tag\":\"ok\",\"value\":17}");
+    require(trap_target==&outer&&memory_used>before&&fuel_used==73&&call_depth==5,"decode preserves arena, trap and statement fuel/depth");
+    encoded(stable,"\"stable\"");encoded(array,"[7]");encoded(alias,"[3]");encoded(map,"{\"a\":9}");
+    encoded(first,"{\"tag\":\"ok\",\"value\":{\"id\":1,\"name\":\"é\\u0000😀\"}}");
+    const char *wrong_rows[]={"{}","{\"id\":1}","{\"id\":true,\"name\":\"x\"}","{\"id\":1,\"name\":\"x\",\"a\\u0000payload\":1}"};
+    const char *row_errors[]={"missing_field","missing_field","numeric_out_of_range","extra_field"};
+    for(size_t i=0;i<sizeof wrong_rows/sizeof wrong_rows[0];i++){
+        char want[160];snprintf(want,sizeof want,"{\"tag\":\"err\",\"error\":\"%s\"}",row_errors[i]);
+        encoded(apx_json_decode(&row_schema,apx_string(wrong_rows[i],(int64_t)strlen(wrong_rows[i]))),want);
+        require(apx_payload(first)->items[1]->length==7&&!memcmp(apx_payload(first)->items[1]->text,"é\0😀",7),"decoded binary string retains complete root");
+    }
+    trap_target=previous;
+    /* Natural parser rejection of invalid bytes is distinct from transport UTF-8. */
+    const char *utf8_bad[]={"\"\xc0\xaf\"","\"\xed\xa0\x80\"","\"\xf4\x90\x80\x80\"","\"\xe2\x82\""};
+    for(size_t i=0;i<sizeof utf8_bad/sizeof utf8_bad[0];i++)encoded(apx_json_decode(&string_schema,apx_string(utf8_bad[i],(int64_t)strlen(utf8_bad[i]))),"{\"tag\":\"err\",\"error\":\"invalid_json\"}");
+    char depth[JSON_DEPTH*2+1];memset(depth,'[',JSON_DEPTH);depth[JSON_DEPTH]='0';memset(depth+JSON_DEPTH+1,']',JSON_DEPTH);
+    encoded(apx_json_decode(&array_schema,apx_string(depth,sizeof depth)),"{\"tag\":\"err\",\"error\":\"type_nesting_limit_exceeded\"}");
+    size_t saved=memory_used;memory_used=APX_MEMORY;
+    decode_terminal(&integer_schema,good,"R204","memory_limit_exceeded","native memory limit exceeded");memory_used=saved;
+    encoded(apx_json_decode(&integer_schema,good),"{\"tag\":\"ok\",\"value\":17}");
+    /* Force real backing allocator failure at parse, not before helper entry. */
+    arena_current=NULL;fail_calloc=1;
+    decode_terminal(&integer_schema,good,"R204","memory_limit_exceeded","native allocation failed");require(!fail_calloc,"decoder consumed backing allocation injection");
+    encoded(apx_json_decode(&integer_schema,good),"{\"tag\":\"ok\",\"value\":17}");
+    /* Resource failure during ok/err construction must use the restored target. */
+    saved=memory_used;memory_used=APX_MEMORY-sizeof(ApxValue);
+    decode_terminal(&integer_schema,good,"R204","memory_limit_exceeded","native memory limit exceeded");memory_used=saved+sizeof(ApxValue);
+    saved=memory_used;memory_used=APX_MEMORY;
+    decode_terminal(&integer_schema,bad,"R204","memory_limit_exceeded","native memory limit exceeded");memory_used=saved;
+    decode_terminal(&invalid_schema,good,"R999","trap","invalid static schema");
+    /* Length is checked before reading even an undersized private byte fixture. */
+    ApxValue over={0};over.kind=VSTR;over.text="0";over.length=APX_INPUT+1;
+    decode_terminal(&integer_schema,&over,"R202","input_limit_exceeded","native input hard limit exceeded");
+    char *limit=malloc(APX_INPUT);require(limit!=NULL,"exact decode input boundary");memset(limit,' ',APX_INPUT);limit[APX_INPUT-1]='0';
+    encoded(apx_json_decode(&integer_schema,apx_string(limit,APX_INPUT)),"{\"tag\":\"ok\",\"value\":0}");free(limit);
+    encoded(apx_json_decode(&integer_schema,good),"{\"tag\":\"ok\",\"value\":17}");encoded(stable,"\"stable\"");encoded(array,"[7]");encoded(alias,"[3]");encoded(map,"{\"a\":9}");
+    require(trap_target==previous&&fuel_used==73&&call_depth==5,"decode terminal recovery retains context");
+    if(!setjmp(escape)){apx_trap("after decode");require(0,"post-decode outer trap");}
+    else require(!strcmp(error_message,"after decode"),"post-decode outer trap remains live");
+    apx_json_reset();
+}
 #ifdef APX_JSON_LINKED
 int main(void){
     if(setjmp(escape)){fprintf(stderr,"linked JSON unexpected trap %s\n",error_message);return 1;}
@@ -224,6 +298,14 @@ int main(void){
     else require(!strcmp(error_code,"R204"),"linked allocation failure exact");
     memory_used=before;fuel_used=0;encoded(apx_entry(input),"[\"ok\"]");require(fuel_used==1&&!call_depth,"linked OOM retry");apx_json_reset();
 #endif
+#if APX_JSON_LINKED == 2
+    ApxValue *text=parsed("\"[1,2]\"");fuel_used=0;
+    ApxValue *snapshot=apx_entry(text);encoded(snapshot,"{\"tag\":\"ok\",\"value\":[1,2]}");
+    require(fuel_used==1&&!call_depth&&trap_target==&escape,"linked decode single-statement fuel and restored trap");
+    encoded(apx_entry(parsed("\"[1,true]\"")),"{\"tag\":\"err\",\"error\":\"numeric_out_of_range\"}");
+    encoded(apx_entry(text),"{\"tag\":\"ok\",\"value\":[1,2]}");encoded(snapshot,"{\"tag\":\"ok\",\"value\":[1,2]}");encoded(text,"\"[1,2]\"");
+    require(trap_target==&escape&&!call_depth,"linked decode error-success preserves context and roots");apx_json_reset();
+#endif
     printf("linked JSON %d: %u checks PASS\n",APX_JSON_LINKED,checks);return 0;
 }
 #else
@@ -239,8 +321,8 @@ static void run(char *const argv[]){fflush(NULL);pid_t p=fork();require(p>=0,"fo
 static void linked(void){
     const char *tmp=getenv("TMPDIR");require(tmp&&strlen(tmp)+24<sizeof directory,"TMPDIR available");snprintf(directory,sizeof directory,"%s/apx-json-XXXXXX",tmp);require(mkdtemp(directory)!=NULL,"private fixture directory");require(!atexit(cleanup),"register fixture cleanup");
     char ssa[4200],assembly[4200],obj[4200],exe[4200],define[48];snprintf(ssa,sizeof ssa,"%s/p.ssa",directory);snprintf(assembly,sizeof assembly,"%s/p.s",directory);snprintf(obj,sizeof obj,"%s/p.o",directory);snprintf(exe,sizeof exe,"%s/linked",directory);
-    const char *sources[]={"M integer\nF main x:i64->i64\n  R x\n","M strings\nF main x:[str]->[str]\n  R x\n"};
-    for(size_t i=0;i<2;i++){
+    const char *sources[]={"M integer\nF main x:i64->i64\n  R x\n","M strings\nF main x:[str]->[str]\n  R x\n","M decode_entry\nF main text:str->result [i64] str\n  R (json_decode [i64] text)\n"};
+    for(size_t i=0;i<3;i++){
         char *il=NULL,*canon=NULL,*diag=NULL;int code=apx_compile_source(sources[i],&il,&canon,&diag);if(code)fprintf(stderr,"%s\n",diag);require(!code&&il,"compile JSON entry");save(ssa,il);free(il);free(canon);free(diag);
         char *qbe[]={".build/tools/qbe","-t","amd64_sysv","-o",assembly,ssa,NULL};run(qbe);char *as[]={"as",assembly,"-o",obj,NULL};run(as);snprintf(define,sizeof define,"-DAPX_JSON_LINKED=%zu",i);
         char *cc[]={"cc","-std=c99","-O2","-Wall","-Wextra","-Werror","-Wno-unused-function","-no-pie",define,
@@ -253,6 +335,6 @@ static void linked(void){
 }
 int main(int argc,char **argv){
     if(argc==2){if(!strcmp(argv[1],"--parse-path"))parse_path();else if(!strcmp(argv[1],"--format-path"))format_path();else if(!strcmp(argv[1],"--ordinary-path"))ordinary_path();else if(!strcmp(argv[1],"--nul-path"))nul_path();else return 2;printf("native JSON %s: %u checks PASS\n",argv[1],checks);return 0;}
-    parse_path();format_path();ordinary_path();nul_path();numeric();strings();fuzz();recovery();linked();apx_json_reset();printf("native JSON: %u checks PASS\n",checks);return 0;
+    parse_path();format_path();ordinary_path();nul_path();numeric();strings();fuzz();recovery();typed_decoding();linked();apx_json_reset();printf("native JSON: %u checks PASS\n",checks);return 0;
 }
 #endif

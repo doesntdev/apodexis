@@ -53,7 +53,7 @@ than with established languages without a suitable comparison.
 | Native compilation | Source → C frontend → QBE IL → assembly → native ELF. No interpreter or JIT fallback. |
 | Language | Functions, structs, arrays, typed string-keyed maps, conditionals, loops, option/result values and matching, local builders, assertions and traps. |
 | Authoring | Checked `row.field` and `rows[index]` reads, inferred unambiguous locals, and `P` builder writeback. Arithmetic and ordinary calls remain prefix expressions. |
-| Pure libraries | Unicode-scalar string operations, strict numeric conversions, immutable maps, array updates and record-copy updates. |
+| Pure libraries | Unicode-scalar string operations, strict numeric conversions, immutable maps, array updates, record-copy updates and typed JSON decoding. |
 | Modules | Explicit imports/exports, sibling-file CLI resolution and inline MCP bundles. |
 | Testing | `X` source tests; combined format/check/test verification; native conformance, regression and sandbox tests. |
 | Agent tooling | Local stdio MCP discovery, language resources, structured checking, guarded canonical repairs, execution, contracts and pseudocode. |
@@ -62,7 +62,8 @@ than with established languages without a suitable comparison.
 Important limits remain. There is no browser/WASM target, GPU backend, HTTP
 listener, database adapter, event loop, package registry, LSP, general function
 value or arbitrary host callback. General user-enum construction and
-option/result/enum JSON inputs are not implemented. The compiler's C API is not a
+direct option/result and enum JSON inputs are not implemented (tagged option/result
+map payloads are supported). The compiler's C API is not a
 promise of a packaged, stable application-embedding library.
 
 ## Initial setup
@@ -198,6 +199,7 @@ See the [types and JSON ABI reference](resources/types.md) for exact rules.
 | [Double values](examples/double_values.apx) | Typed JSON array input, iteration, checked arithmetic and builder writeback. |
 | [Row diff](examples/rowdiff.apx) | Structured input/output, deterministic added/removed/changed IDs, and duplicate handling. |
 | [Compact authoring](examples/compact_authoring.apx) | Postfix reads, local inference and immutable builder snapshots. |
+| [Configuration validator](examples/config_validator.apx) and [usage/maintenance](docs/config-validator.md) | Typed JSON document decoding, strict nested configuration checks, accumulated domain errors and native-MCP maintenance. |
 | [File report](examples/file_report/main.apx) and [report module](examples/file_report/report.apx) | Imports/exports, maps, strict parsing and explicitly granted file operations. |
 | [HTTP response](examples/http_hello.apx) and [static response data](examples/web_static.apx) | Request/response values and asset selection as data transformations, **not running HTTP servers**. |
 

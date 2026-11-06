@@ -55,6 +55,22 @@ The bundle contains `bin/apodexis`, `bin/apx-mcp`, `.build/tools/qbe`,
 license notices. [QBE provenance](../third_party/qbe-provenance.json) records the
 pinned upstream archive and hash.
 
+## Typed JSON decoding
+
+Pure opcode 55 is `(json_decode T text) -> result T str`. The frontend validates
+its static marker through the existing JSON-schema eligibility walk, including
+map-payload rules. QBE handles this call before ordinary operand evaluation:
+only text executes, once; the target uses readonly schema descriptors and the
+existing parser/static validator, not schema JSON parsing at runtime.
+
+The helper catches A101/A102/A103 and A104/`duplicate_field` `abi_input` document failures and returns
+the diagnostic kind, never a payload-bearing message. Duplicate keys are rejected through the typed error result.
+Decoded text is bounded by the existing 8 MiB hard input quota;
+R202, R204 and other runtime failures propagate with their actual diagnostics.
+Every path restores the caller's trap target; no arena reset invalidates earlier
+values. Statement fuel, ABI strictness and default-denied host capabilities are
+unchanged. See [the executable example](../resources/stdlib.md#typed-json-documents).
+
 ## Compiler C API
 
 The frontend exposes these entrypoints in

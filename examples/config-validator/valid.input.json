@@ -1,0 +1,1 @@
+"{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}"

@@ -25,7 +25,7 @@ int main(void){
         apx_json_reset();ApxValue *all=apx_json_parse(catalog,strlen(catalog));assert(all&&apx_json_kind(all)==5);if(i>=apx_json_length(all))break;ApxValue *item=apx_json_item(all,i);const char *source=apx_json_string(apx_json_get(item,"source"));assert(source);char *input=apx_json_encode(apx_json_get(item,"input")),*want=apx_json_encode(apx_json_get(item,"expected"));assert(input&&want);write_file(source_path,source);write_file(input_path,input);free(input);int code;char *response=run("run",source_path,input_path,workspace,&code);assert(code==0);equal_output(response,want);free(response);free(want);builtins++;
     }
     free(catalog);assert(builtins==29);
-    const char *examples[]={"examples/hello.apx","examples/rowdiff.apx","examples/http_hello.apx","examples/web_static.apx"};
+    const char *examples[]={"examples/hello.apx","examples/rowdiff.apx","examples/http_hello.apx","examples/web_static.apx","examples/config_validator.apx"};
     for(size_t i=0;i<sizeof examples/sizeof examples[0];i++){int code;char *response=run("test",examples[i],NULL,workspace,&code);assert(code==0);ApxValue *v=apx_json_parse(response,strlen(response));assert(v);const char *status=apx_json_string(apx_json_get(v,"status"));assert(status&&!strcmp(status,"ok"));assert(apx_json_length(apx_json_get(v,"tests")));declared++;free(response);apx_json_reset();}
     const char *families[]={"rowdiff","http_hello","web_static"};
     for(size_t f=0;f<3;f++){

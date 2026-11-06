@@ -1,6 +1,6 @@
 # Apodexis standard library: every implemented builtin
 
-The standard library provides 54 pure operations (including special `with` lowering)
+The standard library provides 55 pure operations (including special `with` and `json_decode` lowering)
 and six explicitly controlled host operations. Core primitives and essential pure
 libraries are listed below; use only these implemented names and signatures. All calls are prefix
 expressions on one source line. In signatures below, T is notation for the
@@ -39,7 +39,8 @@ alias snapshots, normal item typing, eager item evaluation and capacity traps.
 `(buf Point 3)`. It is not a quoted string or generic bracket expression.
 Use `array_cat`, `array_get`, `array_set`, `array_slice`, and `with` for immutable
 value operations; the string/conversion/map additions are documented below.
-There is still no sort builtin, language-accessible JSON parser or reflection. Use loops
+There is no sort builtin, JSON encoder or reflection. Use `json_decode` for typed JSON
+documents, and loops
 and builders when incremental array construction is needed. For an upper-bound number of appended items,
 choose a capacity that covers that bound; allocation does not extend capacity.
 Builders are values: assigning one copies its logical state; later push/finish
@@ -70,8 +71,9 @@ X values
 ## Runtime traps and limits
 
 Index/builder-capacity errors, division by zero, assertion failure, explicit
-`Z "message"`, invalid ABI input, fuel exhaustion, and configured input/output
-limits are errors, not implicit error variants. No `try`, exception catch, or
+`Z "message"`, invalid entrypoint ABI input, fuel exhaustion, and configured input/output
+limits are errors, not implicit error variants. Only `json_decode` contains its
+document failures, including duplicate fields, as explicit result errors. No `try`, exception catch, or
 `traps` expression is implemented. Test valid behavior with `X`/`A`; examine
 expected-error behavior with explicit `apodexis_run` calls and their diagnostics.
 Do not use unchecked indexing merely because a bool expression has a guard.
@@ -115,8 +117,9 @@ are implied: the two case-conversion operations change ASCII letters only.
 | array_slice | [T], i64 start, i64 count -> [T]; new array, checked bounds. |
 | array_cat | [T], [T] -> new [T]. |
 | with | `(with record field=value ...)` -> same record type; named immutable updates. |
+| json_decode | `(json_decode T text)` -> result T str; concrete JSON-compatible type marker, str evaluated once. See below. |
 
-Parsing rejects whitespace, leading plus, trailing data, embedded NUL, overflow,
+`parse_i64`/`parse_f64` reject whitespace, leading plus, trailing data, embedded NUL, overflow,
 NaN and infinity. Parse failure is `(err "invalid i64")` or `(err "invalid f64")`.
 Slices/array replacement trap on invalid bounds; empty split/replace patterns
 trap. These are not implicit option/result failures.
@@ -137,6 +140,56 @@ X snapshots
   A (= original [1 2])
   A (= revised [9 2])
   A (= (str_slice "aé😀" 1 2) "é😀")
+```
+
+## Typed JSON documents
+
+`(json_decode T text)` takes a concrete type marker and one `str` expression,
+evaluated exactly once. It returns `result T str` without an expected-type hint.
+T must satisfy the existing JSON input schema rules: primitives, arrays, typed
+maps and exact-field structs, with the existing tagged option/result map-payload
+exception. Direct option/result, enum, builder and unresolved targets are rejected
+even by check-only tools. No dynamic schema or `any` value is introduced.
+
+Success normalizes values exactly like entrypoint input: i64 accepts only an
+in-range integer token (not bool, float or numeric text); f64 accepts integer or
+finite floating numbers, including subnormal/underflow values. Structs retain
+declaration order; maps sort by unsigned UTF-8 key bytes, including embedded NUL.
+JSON whitespace, UTF-8, escapes/surrogates and trailing-data checks remain strict.
+Escaped JSON NUL is allowed in strings/keys; raw NUL bytes are not ignored.
+
+A101/A102/A103 and A104/`duplicate_field` `abi_input` failures return `err` with the stable diagnostic kind,
+such as `invalid_json`, `numeric_out_of_range`, `type_mismatch`, `missing_field`,
+`extra_field`, `duplicate_field` or `type_nesting_limit_exceeded`. No document text or diagnostic
+message is returned. All other failures propagate, including operand
+traps, R204 memory exhaustion and R202 when decoded text exceeds 8 MiB.
+Decode retains existing values/snapshots and does not reset the arena. It adds no
+per-builtin fuel surcharge; helper statements and existing hard budgets still apply.
+
+Complete example (save as `decode_example.apx`, then run
+`apodexis test decode_example.apx --json`; `run --input` takes a JSON **string**
+containing the document, e.g. `"{\"label\":\"demo\",\"ports\":[80,443]}"`):
+
+```apodexis
+M decode_example
+T Settings struct
+  label:str
+  ports:[i64]
+F main text:str->result Settings str
+  R (json_decode Settings text)
+X valid
+  C (main "{\"ports\":[80,443],\"label\":\"demo\"}")
+    ok settings
+      A (= settings.label "demo")
+      A (= settings.ports [80 443])
+    err problem
+      A false
+X missing
+  C (main "{\"label\":\"demo\"}")
+    ok settings
+      A false
+    err problem
+      A (= problem "missing_field")
 ```
 
 ## Explicit host operations

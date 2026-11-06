@@ -16,6 +16,6 @@ int main(void){char directory[]=".build/reference-programs-XXXXXX";require(mkdte
         while((p=strstr(p,fence))){p+=sizeof fence-1;char *end=strstr(p,"```");require(end!=NULL,"closed source fence");char saved=*end;*end=0;if(!strncmp(p,"M ",2))verify(p,directory);*end=saved;p=end+3;}
         free(text);
     }
-    char *data=load("resources/examples.json");ApxValue *all=apx_json_parse(data,strlen(data));require(all&&apx_json_kind(all)==5&&apx_json_length(all)==4,"four current MCP examples");
+    char *data=load("resources/examples.json");ApxValue *all=apx_json_parse(data,strlen(data));require(all&&apx_json_kind(all)==5&&apx_json_length(all)==5,"five current MCP examples");
     for(size_t i=0;i<apx_json_length(all);i++){const char *source=apx_json_string(apx_json_get(apx_json_item(all,i),"source"));require(source!=NULL,"MCP source exists");verify(source,directory);}
-    free(data);require(programs==10,"all ten complete reference programs executed");char file[4096];snprintf(file,sizeof file,"%s/source.apx",directory);unlink(file);snprintf(file,sizeof file,"%s/output",directory);unlink(file);require(!rmdir(directory),"reference scratch cleanup");apx_json_reset();printf("native reference programs: %u modules, %u source tests, all three guides and MCP example data PASS\n",programs,declared_tests);return 0;}
+    free(data);require(programs==12,"all twelve complete reference programs executed");char file[4096];snprintf(file,sizeof file,"%s/source.apx",directory);unlink(file);snprintf(file,sizeof file,"%s/output",directory);unlink(file);require(!rmdir(directory),"reference scratch cleanup");apx_json_reset();printf("native reference programs: %u modules, %u source tests, all three guides and MCP example data PASS\n",programs,declared_tests);return 0;}

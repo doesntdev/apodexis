@@ -19,6 +19,8 @@ typedef struct {
     unsigned inline_nodes, inline_sites;
 } FunctionEmitter;
 static const ApxSpan no_span = {0, 0};
+static void schema_type(Emitter *e,ApxBuffer *b,ApxType *type,unsigned depth,ApxSpan span,int map_payload);
+static char *schema_descriptor(Emitter *e,ApxType *type);
 static char *symbol(ApxContext *ctx, const char *prefix, unsigned id) {
     char text[64]; snprintf(text, sizeof text, "%s%u", prefix, id); return apx_copy(ctx, text, strlen(text));
 }
@@ -241,6 +243,15 @@ static char *expression(FunctionEmitter *f, ApxExpr *e) {
         apx_buf_printf(&args, "w 19, l %s, l 0", capacity); return call(f, "$apx_builtin", 'l', args.data);
     }
     if (e->opcode == 43) return call(f,"$apx_builtin",'l',"w 43, l 0, l 0");
+    if (e->opcode == 55) {
+        /* The first operand is syntax, never an executable expression. */
+        ApxType *target=e->args->expr->marker; ApxBuffer schema;
+        apx_buf_init(&schema,owner->ctx);
+        schema_type(owner,&schema,target,0,e->args->expr->span,0);
+        char *descriptor=schema_descriptor(owner,target);
+        char *text=expression(f,e->args->next->expr);
+        return call2(f,"$apx_json_decode",'l',descriptor,text);
+    }
     /* Evaluate positional function arguments and named constructor fields in
        textual order. Only constructors reorder the resulting registers. */
     values = apx_alloc(owner->ctx, (e->count ? e->count : 1) * sizeof *values);
@@ -436,6 +447,11 @@ static void schema_type(Emitter *e, ApxBuffer *b, ApxType *type, unsigned depth,
         }
         apx_buf_put(b, "]}");
     } else apx_fail(e->ctx, "A104", "abi", "unsupported_input_type", span, "JSON input must use primitive, array or struct types");
+}
+void apx_check_json_type(ApxContext *ctx,ApxProgram *program,ApxType *type,ApxSpan span){
+    Emitter e; ApxBuffer schema;
+    memset(&e,0,sizeof e); e.ctx=ctx; e.program=program;
+    apx_buf_init(&schema,ctx); schema_type(&e,&schema,type,0,span,0);
 }
 /* schema_type above remains the authority for ABI eligibility/depth/diagnostics.
  * Emit descriptors only AFTER it succeeds, never as a substitute for that walk.

@@ -28,7 +28,7 @@ static const char *const builtin_names[] = {
     "str_chars", "str_char", "str_slice", "str_find", "str_split", "str_trim",
     "str_replace", "str_lower_ascii", "str_upper_ascii", "parse_i64", "parse_f64",
     "str_i64", "str_f64", "map", "map_get", "map_put", "map_remove", "map_has",
-    "map_keys", "map_values", "array_get", "array_set", "array_slice", "array_cat", "with"
+    "map_keys", "map_values", "array_get", "array_set", "array_slice", "array_cat", "with", "json_decode"
 };
 int apx_builtin_opcode(const char *name) {
     static const char *const host_names[]={"fs_read","fs_write","env_get","clock_ms","random_hex","http_get"};
@@ -43,7 +43,9 @@ void apx_fail(ApxContext *ctx, const char *code, const char *phase,
     ctx->failed = 1; ctx->error_code = code; ctx->error_phase = phase;
     ctx->error_kind = kind; ctx->error_span = span; ctx->error_message = message;
     if (ctx->collect_diagnostics && ctx->recovery &&
-        (!strcmp(phase, "resolve") || !strcmp(phase, "type")))
+        (!strcmp(phase, "resolve") || !strcmp(phase, "type") ||
+         /* json_decode checks ABI eligibility during source inference. */
+         (!strcmp(code,"A104") && !strcmp(phase,"abi") && !strcmp(kind,"unsupported_input_type"))))
         longjmp(ctx->recovery->jump, 1);
     longjmp(ctx->escape, 1);
 }
@@ -293,7 +295,7 @@ static ApxExpr *parse_atom(ApxContext *ctx, Token **tokens, unsigned depth) {
                 apx_buf_printf(&name,"%s.%s",e->text,member->text);e->text=name.data;
                 head->span.end=member->span.end;*tokens=member->next;
             }
-            if ((!strcmp(head->text, "buf") || !strcmp(head->text, "map")) && *tokens && strcmp((*tokens)->text, ")")) {
+            if ((!strcmp(head->text, "buf") || !strcmp(head->text, "map") || !strcmp(head->text, "json_decode")) && *tokens && strcmp((*tokens)->text, ")")) {
                 ApxArg *a = apx_alloc(ctx, sizeof *a); ApxExpr *marker = apx_alloc(ctx, sizeof *marker);
                 marker->kind = APX_TYPE_EXPR; marker->span = (*tokens)->span; marker->marker = parse_type(ctx, tokens, depth + 1);
                 marker->syntax_height=parsed_type_height(marker->marker);
@@ -749,6 +751,15 @@ static ApxType *infer_pure(Checker *c, ApxExpr *e, ApxType *expected) {
         }
         e->record=d; return bad||poisoned(left)?&poison_type:left;
     }
+    if(op==55){
+        positional(c,e,2);
+        if(a->expr->kind!=APX_TYPE_EXPR) mismatch(c,e->span,"json_decode requires a concrete type marker and str text");
+        left=a->expr->marker;
+        if(!validate_type_all(c,left,a->expr->span,1) || !usable_type(c,left))bad=1;
+        if(!bad)apx_check_json_type(c->ctx,c->program,left,a->expr->span);
+        if(poisoned(infer(c,a->next->expr,str)))bad=1;
+        return bad?&poison_type:type_new(c->ctx,APX_RESULT,left,str);
+    }
     if(op==43){
         positional(c,e,1);
         if(a->expr->kind!=APX_TYPE_EXPR) mismatch(c,e->span,"map requires a concrete value type marker");
@@ -789,7 +800,7 @@ static ApxType *infer_pure(Checker *c, ApxExpr *e, ApxType *expected) {
 static ApxType *infer_call(Checker *c, ApxExpr *e, ApxType *expected) {
     int op = apx_builtin_opcode(e->text); ApxArg *a = e->args; ApxType *left, *primitive; size_t count = 2;
     e->opcode = op;
-    if (op >= 30 && op <= 54) return infer_pure(c,e,expected);
+    if (op >= 30 && op <= 55) return infer_pure(c,e,expected);
     if(op>=1001&&op<=1006){
         int bad=0;positional(c,e,op==1004?0:op==1002?2:1);
         ApxType *str=type_new(c->ctx,APX_STR,NULL,NULL),*i64=type_new(c->ctx,APX_I64,NULL,NULL);
@@ -939,6 +950,7 @@ static void infer_unvisited_arguments(Checker *c, ApxExpr *e, ApxType *expected,
         if (op <= 5 && op && expected && (expected->kind == APX_I64 || expected->kind == APX_F64)) hint = expected;
         if (op >= 12 && op <= 15) hint = type_new(c->ctx, op == 15 ? APX_STR : APX_BOOL, NULL, NULL);
         if ((op == 17 || op == 19) && a != e->args) hint = type_new(c->ctx, APX_I64, NULL, NULL);
+        if (op == 55 && a == e->args->next) hint = type_new(c->ctx, APX_STR, NULL, NULL);
         if (a->expr->type || a->expr->kind == APX_TYPE_EXPR || (op == 18 && a != e->args)) continue;
         infer(c, a->expr, hint);
     }

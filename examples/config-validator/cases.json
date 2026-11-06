@@ -1,0 +1,797 @@
+{
+  "schema": "apodexis.config_validator_cases.v1",
+  "cases": [
+    {
+      "id": "development",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": true,
+        "errors": []
+      }
+    },
+    {
+      "id": "production",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"production\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":1000,\"retries\":3,\"debug\":false}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": true,
+        "errors": []
+      }
+    },
+    {
+      "id": "staging",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"staging\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": true,
+        "errors": []
+      }
+    },
+    {
+      "id": "unicode",
+      "input": "{\"name\":\"λ🙂\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": true,
+        "errors": []
+      }
+    },
+    {
+      "id": "port-1",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":1},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": true,
+        "errors": []
+      }
+    },
+    {
+      "id": "port-65535",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":65535},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": true,
+        "errors": []
+      }
+    },
+    {
+      "id": "timeout-100",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":100,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": true,
+        "errors": []
+      }
+    },
+    {
+      "id": "timeout-300000",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":300000,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": true,
+        "errors": []
+      }
+    },
+    {
+      "id": "retries-0",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":1000,\"retries\":0,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": true,
+        "errors": []
+      }
+    },
+    {
+      "id": "retries-10",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":1000,\"retries\":10,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": true,
+        "errors": []
+      }
+    },
+    {
+      "id": "blank-name",
+      "input": "{\"name\":\" \\t\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "name_invalid"
+        ]
+      }
+    },
+    {
+      "id": "nul-name",
+      "input": "{\"name\":\"a\\u0000b\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "name_invalid"
+        ]
+      }
+    },
+    {
+      "id": "unknown-environment",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"prod\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "environment_invalid"
+        ]
+      }
+    },
+    {
+      "id": "case-sensitive-environment",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"Production\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "environment_invalid"
+        ]
+      }
+    },
+    {
+      "id": "blank-host",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"\\n \",\"port\":8080},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "host_invalid"
+        ]
+      }
+    },
+    {
+      "id": "nul-host",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"a\\u0000b\",\"port\":8080},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "host_invalid"
+        ]
+      }
+    },
+    {
+      "id": "production-debug",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"production\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "production_debug_enabled"
+        ]
+      }
+    },
+    {
+      "id": "bad-port-0",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":0},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "port_out_of_range"
+        ]
+      }
+    },
+    {
+      "id": "bad-port--1",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":-1},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "port_out_of_range"
+        ]
+      }
+    },
+    {
+      "id": "bad-port-65536",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":65536},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "port_out_of_range"
+        ]
+      }
+    },
+    {
+      "id": "bad-port-9223372036854775807",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":9223372036854775807},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "port_out_of_range"
+        ]
+      }
+    },
+    {
+      "id": "bad-timeout-99",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":99,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "timeout_out_of_range"
+        ]
+      }
+    },
+    {
+      "id": "bad-timeout-300001",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":300001,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "timeout_out_of_range"
+        ]
+      }
+    },
+    {
+      "id": "bad-retries--1",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":1000,\"retries\":-1,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "retries_out_of_range"
+        ]
+      }
+    },
+    {
+      "id": "bad-retries-11",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":1000,\"retries\":11,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "retries_out_of_range"
+        ]
+      }
+    },
+    {
+      "id": "multiple-domain-errors",
+      "input": "{\"name\":\"\",\"environment\":\"bad\",\"server\":{\"host\":\"\",\"port\":0},\"timeout_ms\":99,\"retries\":11,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "name_invalid",
+          "environment_invalid",
+          "host_invalid",
+          "port_out_of_range",
+          "timeout_out_of_range",
+          "retries_out_of_range"
+        ]
+      }
+    },
+    {
+      "id": "empty-object",
+      "input": "{}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "decode: missing_field"
+        ]
+      }
+    },
+    {
+      "id": "nested-missing",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\"},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "decode: missing_field"
+        ]
+      }
+    },
+    {
+      "id": "extra-root",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":1000,\"retries\":3,\"debug\":true,\"extra\":1}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "decode: extra_field"
+        ]
+      }
+    },
+    {
+      "id": "extra-nested",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080,\"extra\":1},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "decode: extra_field"
+        ]
+      }
+    },
+    {
+      "id": "strict-port-bool",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":true},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "decode: numeric_out_of_range"
+        ]
+      }
+    },
+    {
+      "id": "strict-port-float",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080.0},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "decode: numeric_out_of_range"
+        ]
+      }
+    },
+    {
+      "id": "strict-port-string",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":\"8080\"},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "decode: numeric_out_of_range"
+        ]
+      }
+    },
+    {
+      "id": "strict-port-overflow",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":9223372036854775808},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "decode: numeric_out_of_range"
+        ]
+      }
+    },
+    {
+      "id": "strict-timeout",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":true,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "decode: numeric_out_of_range"
+        ]
+      }
+    },
+    {
+      "id": "strict-debug",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":1000,\"retries\":3,\"debug\":1}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "decode: type_mismatch"
+        ]
+      }
+    },
+    {
+      "id": "server-wrong-type",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":[],\"timeout_ms\":1000,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "decode: type_mismatch"
+        ]
+      }
+    },
+    {
+      "id": "empty-document",
+      "input": "",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "decode: invalid_json"
+        ]
+      }
+    },
+    {
+      "id": "malformed",
+      "input": "{",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "decode: invalid_json"
+        ]
+      }
+    },
+    {
+      "id": "trailing-data",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}x",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "decode: invalid_json"
+        ]
+      }
+    },
+    {
+      "id": "raw-nul",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}\u0000",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "decode: invalid_json"
+        ]
+      }
+    },
+    {
+      "id": "duplicate",
+      "input": "{\"name\":\"a\",\"name\":\"b\"}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "decode: duplicate_field"
+        ]
+      }
+    },
+    {
+      "id": "escaped-duplicate",
+      "input": "{\"name\":\"a\",\"\\u006eame\":\"b\"}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "decode: duplicate_field"
+        ]
+      }
+    },
+    {
+      "id": "surrogate",
+      "input": "{\"name\":\"\\ud800\"}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "decode: invalid_json"
+        ]
+      }
+    },
+    {
+      "id": "null-document",
+      "input": "null",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "decode: type_mismatch"
+        ]
+      }
+    },
+    {
+      "id": "array-document",
+      "input": "[]",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "decode: type_mismatch"
+        ]
+      }
+    },
+    {
+      "id": "overflow-float",
+      "input": "1e999",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": false,
+        "errors": [
+          "decode: numeric_out_of_range"
+        ]
+      }
+    },
+    {
+      "id": "json-whitespace",
+      "input": " \t\r\n{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":1000,\"retries\":3,\"debug\":true} \r\n",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": true,
+        "errors": []
+      }
+    },
+    {
+      "id": "sorted-keys",
+      "input": "{\"debug\":true,\"environment\":\"development\",\"name\":\"apx-service\",\"retries\":3,\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":1000}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": true,
+        "errors": []
+      }
+    },
+    {
+      "id": "exact-input-limit",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 159,
+        "max_output_bytes": 16384
+      },
+      "expected_output": {
+        "valid": true,
+        "errors": []
+      }
+    },
+    {
+      "id": "input-limit-minus-one",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 158,
+        "max_output_bytes": 16384
+      },
+      "expected_diagnostic_kind": "input_limit_exceeded"
+    },
+    {
+      "id": "exact-output-limit",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 26
+      },
+      "expected_output": {
+        "valid": true,
+        "errors": []
+      }
+    },
+    {
+      "id": "output-limit-minus-one",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 25
+      },
+      "expected_diagnostic_kind": "output_limit_exceeded"
+    },
+    {
+      "id": "zero-fuel",
+      "input": "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}",
+      "limits": {
+        "fuel": 0,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_diagnostic_kind": "fuel_exhausted"
+    },
+    {
+      "id": "wrong-outer-json-type",
+      "input": {
+        "name": "apx-service",
+        "environment": "development",
+        "server": {
+          "host": "127.0.0.1",
+          "port": 8080
+        },
+        "timeout_ms": 1000,
+        "retries": 3,
+        "debug": true
+      },
+      "limits": {
+        "fuel": 100000,
+        "max_input_bytes": 65536,
+        "max_output_bytes": 16384
+      },
+      "expected_diagnostic_kind": "type_mismatch"
+    }
+  ]
+}

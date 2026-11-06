@@ -89,9 +89,9 @@ unsafe index. First use a `?` or `W` to prove an index is in bounds, then call `
 
 User functions require positional arguments in declared order: `(add 2 3)`.
 Named arguments are reserved for struct constructors; `(add left=2 right=3)` is
-rejected with `N104`. Builtins use positional arguments, except `buf`'s first
-argument is a type. Struct constructors require every field exactly once as
-named arguments: `(Point x=2 y=3)`. Field reads use `point.x`, or the canonical
+rejected with `N104`. Builtins use positional arguments; `buf`, `map`, and
+`json_decode` take a concrete type marker first, not a runtime expression. Struct
+constructors require every field exactly once as named arguments: `(Point x=2 y=3)`. Field reads use `point.x`, or the canonical
 `(. point x)` where `x` is the declared field name. There is no array/struct
 element assignment: construct a new value.
 

@@ -111,7 +111,9 @@ expansion is `S name (push name item)`. Neither form changes existing aliases.
 finite f64 (also integer JSON numbers), str, arrays, typed maps as JSON objects, and declared structs as
 exact-field objects. A no-parameter main accepts absent/null input; this does
 not mean null is a typed language value. A typed parameter does not accept null.
-Option, result, user-enum, builder, and null inputs are not supported.
+Direct option/result, user-enum, builder, and null inputs are not supported.
+Within a typed map payload, existing tagged option/result forms are supported;
+this does not enable direct option/result parameters.
 Numeric strings are not numbers; booleans are not integers. Missing and extra
 struct fields are errors. Malformed input is rejected by the boundary before
 main runs; do not turn it into a successful default or empty response.
@@ -120,6 +122,15 @@ For the Point example, JSON `{"x":3,"y":4}` produces JSON number `25`.
 Arrays use JSON arrays, including `[]` where the contract determines the type.
 For a struct with an array field, pass `{"items":[...]}`, not a tagged variant.
 Read `apodexis_explain` for the actual contract instead of guessing field types.
+
+## Typed document decoding
+
+`(json_decode T text)` checks the same input-eligible T and returns `result T str`.
+T is a static marker, including nested forms such as `map [Point]`; text is one
+str expression. Decode does not broaden entrypoint eligibility or create a
+universal JSON type. It strictly validates the entire byte-length string;
+A101/A102/A103 and A104/`duplicate_field` document errors become stable kind strings, while other failures
+remain terminal. See the complete example and limits in `apodexis://spec/stdlib`.
 
 ## Exact JSON output boundary
 
@@ -144,8 +155,9 @@ empty map without redundant local annotation; maps may nest in arrays/structs/ma
 Builders cannot be stored in maps. Keys are compared by unsigned UTF-8 bytes,
 including embedded NUL, and enumeration/JSON encoding is in sorted key order.
 Maps compare structurally regardless of insertion order. JSON input objects are
-validated against their value type; map output is a JSON object. Option/result
-map values can be constructed and returned, but do not grant option/result input.
+validated against their value type; map output is a JSON object. Tagged option/result
+values are accepted within map payloads, including nested payload structures,
+but do not grant direct option/result input.
 
 `map_put`, `map_remove`, `array_set`, `array_slice`, `array_cat`, and
 `(with record field=value ...)` return new immutable values. Update payloads are

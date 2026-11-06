@@ -20,12 +20,98 @@ static void native(const char *source,const char *input,const char *want,const c
     if(!v||WEXITSTATUS(status)!=(error?2:0)){fprintf(stderr,"SOURCE:\n%s\nRESULT:\n%s\n",source,text);require(0,"native success/error status");}
     require(v!=NULL,"native envelope JSON");
     if(!strncmp(source,"M once\n",7))require(apx_json_integer(apx_json_get(v,"fuel_used"))==5,"record and update payload evaluated exactly once");
+    if(!strncmp(source,"M decode_once\n",14))require(apx_json_integer(apx_json_get(v,"fuel_used"))==2,"decode text evaluated exactly once, marker costs no fuel");
     if(error){ApxValue *diag=apx_json_get(v,"diagnostic");const char *code=apx_json_string(apx_json_get(diag,"code"));require(code&&!strcmp(code,error),"native diagnostic code");if(want){const char *msg=apx_json_string(apx_json_get(diag,"message"));require(msg&&!strcmp(msg,want),"native trap operand order");}}
     else{char *got=apx_json_encode(apx_json_get(v,"output"));ApxValue *expected=apx_json_parse(want,strlen(want));char *canonical=apx_json_encode(expected);if(!got||!canonical||strcmp(got,canonical))fprintf(stderr,"SOURCE:\n%s\nGOT %s\nWANT %s\n",source,got?got:"NULL",want);require(got&&canonical&&!strcmp(got,canonical),"exact native output");free(got);free(canonical);}
     free(text);apx_json_reset();native_cases++;
 }
 static void expression(const char *type,const char *expr,const char *want,const char *error,const char *directory){char source[8192];snprintf(source,sizeof source,"M pure\nF main->%s\n  R %s\n",type,expr);native(source,"null",want,error,directory);}
 static void invalid(const char *source,const char *code){char *canonical=NULL,*diag=NULL;int result=apx_check_source(source,&canonical,&diag);if(!result||!diag||!strstr(diag,code))fprintf(stderr,"invalid source:\n%s\ndiag %s\n",source,diag?diag:"NULL");require(result&&diag&&strstr(diag,code),"recoverable semantic diagnostic");free(canonical);free(diag);semantic_cases++;}
+/* Exercise decode through the same native CLI as the other pure libraries. */
+static void decode(const char *type,const char *wire,size_t length,const char *want,const char *error,const char *d){
+    char source[8192];snprintf(source,sizeof source,"M decode\nF main text:str->result %s str\n  R (json_decode %s text)\n",type,type);
+    char *input=apx_json_encode(apx_string(wire,(int64_t)length));require(input!=NULL,"decode input envelope");
+    native(source,input,want,error,d);free(input);
+}
+static void json_decoding(const char *d){
+    decode("i64","9223372036854775807",19,"{\"tag\":\"ok\",\"value\":9223372036854775807}",NULL,d);
+    decode("i64","-9223372036854775808",20,"{\"tag\":\"ok\",\"value\":-9223372036854775808}",NULL,d);
+    const char *bad_integer[]={"9223372036854775808","-9223372036854775809","1.0","true","\"1\"","null"};
+    for(size_t i=0;i<sizeof bad_integer/sizeof bad_integer[0];i++)decode("i64",bad_integer[i],strlen(bad_integer[i]),"{\"tag\":\"err\",\"error\":\"numeric_out_of_range\"}",NULL,d);
+    const char *floats[]={"1","0.1","5e-324","1e-999","-1e-999","1.7976931348623157e308","9223372036854775808"};
+    const char *values[]={"1.0","0.1","5e-324","0.0","-0.0","1.7976931348623157e+308","9.223372036854776e+18"};
+    for(size_t i=0;i<sizeof floats/sizeof floats[0];i++){char want[160];snprintf(want,sizeof want,"{\"tag\":\"ok\",\"value\":%s}",values[i]);decode("f64",floats[i],strlen(floats[i]),want,NULL,d);}
+    decode("f64","1e999",5,"{\"tag\":\"err\",\"error\":\"numeric_out_of_range\"}",NULL,d);
+    decode("f64","true",4,"{\"tag\":\"err\",\"error\":\"numeric_out_of_range\"}",NULL,d);
+    decode("bool","true",4,"{\"tag\":\"ok\",\"value\":true}",NULL,d);
+    decode("bool","0",1,"{\"tag\":\"err\",\"error\":\"type_mismatch\"}",NULL,d);
+    decode("str","\"é😀\\u0000x\"",strlen("\"é😀\\u0000x\""),"{\"tag\":\"ok\",\"value\":\"é😀\\u0000x\"}",NULL,d);
+    decode("str","\"\\ud83d\\ude00\"",14,"{\"tag\":\"ok\",\"value\":\"😀\"}",NULL,d);
+    decode("[i64]","[1,-2]",6,"{\"tag\":\"ok\",\"value\":[1,-2]}",NULL,d);
+    decode("map [i64]","{\"z\":[],\"a\\u0000\":[2],\"a\":[1]}",strlen("{\"z\":[],\"a\\u0000\":[2],\"a\":[1]}"),"{\"tag\":\"ok\",\"value\":{\"a\":[1],\"a\\u0000\":[2],\"z\":[]}}",NULL,d);
+    decode("map option i64","{\"n\":{\"tag\":\"none\"},\"s\":{\"tag\":\"some\",\"value\":7}}",strlen("{\"n\":{\"tag\":\"none\"},\"s\":{\"tag\":\"some\",\"value\":7}}"),"{\"tag\":\"ok\",\"value\":{\"n\":{\"tag\":\"none\"},\"s\":{\"tag\":\"some\",\"value\":7}}}",NULL,d);
+    decode("map result i64 str","{\"e\":{\"tag\":\"err\",\"error\":\"bad\"},\"o\":{\"tag\":\"ok\",\"value\":1}}",strlen("{\"e\":{\"tag\":\"err\",\"error\":\"bad\"},\"o\":{\"tag\":\"ok\",\"value\":1}}"),"{\"tag\":\"ok\",\"value\":{\"e\":{\"tag\":\"err\",\"error\":\"bad\"},\"o\":{\"tag\":\"ok\",\"value\":1}}}",NULL,d);
+    const char *malformed[]={"","[1,]","01","1 2","\v1","\"\\ud800\"","\"\\uDC00\"","\"\\x00\""};
+    for(size_t i=0;i<sizeof malformed/sizeof malformed[0];i++)decode("i64",malformed[i],strlen(malformed[i]),"{\"tag\":\"err\",\"error\":\"invalid_json\"}",NULL,d);
+    const char nul[]={'1',0,'2'};decode("i64",nul,sizeof nul,"{\"tag\":\"err\",\"error\":\"invalid_json\"}",NULL,d);
+    const char raw_string[]={'"','a',0,'b','"'};decode("str",raw_string,sizeof raw_string,"{\"tag\":\"err\",\"error\":\"invalid_json\"}",NULL,d);
+    /* Duplicate fields are rejected document data, not terminal resources. */
+    decode("map i64","{\"a\":1,\"a\":2}",13,"{\"tag\":\"err\",\"error\":\"duplicate_field\"}",NULL,d);
+    const char *row="M nested\nT Row struct\n  id:i64\n  groups:map [bool]\nF main text:str->result [Row] str\n  R (json_decode [Row] text)\n";
+    native(row,"\"[{\\\"groups\\\":{\\\"z\\\":[true,false],\\\"a\\\":[]},\\\"id\\\":7}]\"","{\"tag\":\"ok\",\"value\":[{\"id\":7,\"groups\":{\"a\":[],\"z\":[true,false]}}]}",NULL,d);
+    native(row,"\"[{\\\"id\\\":7}]\"","{\"tag\":\"err\",\"error\":\"missing_field\"}",NULL,d);
+    native(row,"\"[{\\\"id\\\":7,\\\"groups\\\":{},\\\"untrusted\\\":1}]\"","{\"tag\":\"err\",\"error\":\"extra_field\"}",NULL,d);
+    native(row,"\"[{\\\"id\\\":7,\\\"groups\\\":{\\\"x\\\":[1]}}]\"","{\"tag\":\"err\",\"error\":\"type_mismatch\"}",NULL,d);
+    native("M decoded_match\nF main->i64\n  C (json_decode i64 \"17\")\n    ok n\n      R (+ n 1)\n    err message\n      R (# message)\n","null","18",NULL,d);
+    native("M decoded_bool\nF main->bool\n  C (json_decode bool \"true\")\n    ok b\n      R (! b)\n    err message\n      R false\n","null","false",NULL,d);
+    native("M decoded_float\nF main->f64\n  C (json_decode f64 \"1\")\n    ok n\n      R (+ n 0.5)\n    err message\n      R 0.0\n","null","1.5",NULL,d);
+    native("M decode_once\nF text->str\n  R \"1\"\nF main->result i64 str\n  R (json_decode i64 (text))\n","null","{\"tag\":\"ok\",\"value\":1}",NULL,d);
+    native("M decode_trap\nF text->str\n  Z \"operand trap\"\nF main->result i64 str\n  R (json_decode i64 (text))\n","null","operand trap","R999",d);
+}
+static void decode_semantic(void){
+    const char *bad[]={"(json_decode)","(json_decode i64)","(json_decode i64 \"1\" \"2\")","(json_decode i64 1)","(json_decode i64 text=\"1\")","(json_decode Missing \"1\")","(json_decode any \"1\")","(json_decode builder i64 \"1\")","(json_decode option i64 \"1\")","(json_decode result i64 str \"1\")","(json_decode [option i64] \"[]\")"};
+    const char *codes[]={"T101","T101","T101","T101","N104","N101","N101","T101","A104","A104","A104"};
+    for(size_t i=0;i<sizeof bad/sizeof bad[0];i++){
+        char source[8192];snprintf(source,sizeof source,"M bad_decode\nF main->i64\n  L value %s\n  R 0\n",bad[i]);invalid(source,codes[i]);
+        char *il=NULL,*diag=NULL;require(apx_compile_source(source,&il,NULL,&diag)&&!il&&diag&&strstr(diag,codes[i]),"decode compile agrees with check rejection");free(diag);
+    }
+    invalid("M marker_literal\nF main->i64\n  L value (json_decode \"i64\" \"1\")\n  R 0\n","P001");
+    invalid("M marker_missing\nF main->i64\n  L value (json_decode [i64 \"[]\")\n  R 0\n","P001");
+    invalid("M enum_decode\nT Kind enum\n  First\nF main->i64\n  L value (json_decode Kind \"{}\")\n  R 0\n","A104");
+    invalid("M nested_decode\nT Row struct\n  value:option i64\nF main->i64\n  L value (json_decode Row \"{}\")\n  R 0\n","A104");
+    invalid("M invalid_decode\nT Row struct\n  value:Missing\nF main->i64\n  L value (json_decode [Row] \"[]\")\n  R 0\n","N101");
+    invalid("M recursive_decode\nT Row struct\n  value:Row\nF main->i64\n  L value (json_decode Row \"{}\")\n  R 0\n","T104");
+    invalid("M result_decode\nF main->result bool str\n  R (json_decode i64 \"1\")\n","T101");
+    char *diag=NULL;require(apx_check_source("M hole_decode\nF main->result i64 str\n  R (json_decode i64 _)\n",NULL,&diag)&&diag&&strstr(diag,"H001")&&strstr(diag,"\"expected_type\":\"str\""),"decode text hole expects str");free(diag);
+    char *canonical=NULL,*again=NULL;const char *source="M marker_decode\nF main text:str->result map [i64] str\n  R (json_decode map [i64] text)\n";
+    require(!apx_check_source(source,&canonical,&diag)&&canonical&&diag&&!strcmp(diag,"[]"),"concrete nested marker check");free(diag);diag=NULL;
+    again=apx_format_source(canonical,&diag);require(again&&!strcmp(again,canonical)&&!diag,"decode marker canonical roundtrip");free(again);free(canonical);
+    char deep[8192];size_t n=(size_t)snprintf(deep,sizeof deep,"M deep_decode\nF main->i64\n  L value (json_decode ");
+    for(size_t i=0;i<65;i++)deep[n++]='[';
+    memcpy(deep+n,"i64",3);n+=3;
+    for(size_t i=0;i<65;i++)deep[n++]=']';
+    snprintf(deep+n,sizeof deep-n," \"[]\")\n  R 0\n");invalid(deep,"P001");
+    n=(size_t)snprintf(deep,sizeof deep,"M expanded_decode\nT Node0 struct\n  value:i64\n");
+    for(size_t i=1;i<64;i++)n+=(size_t)snprintf(deep+n,sizeof deep-n,"T Node%zu struct\n  value:Node%zu\n",i,i-1);
+    snprintf(deep+n,sizeof deep-n,"F main->i64\n  L decoded (json_decode [Node63] \"[]\")\n  R 0\n");invalid(deep,"T106");
+    require(apx_check_source("M rejected_hole_decode\nF main->i64\n  L value (json_decode option i64 _)\n  R 0\n",NULL,&diag)&&diag&&strstr(diag,"A104")&&strstr(diag,"H001")&&strstr(diag,"\"expected_type\":\"str\""),"rejected decode retains typed text hole feedback");free(diag);
+    require(apx_builtin_opcode("json_decode")==55&&apx_builtin_opcode("fs_read")==1001&&apx_builtin_opcode("http_get")==1006,"decode appends opcode without moving hosts");
+}
+static void decode_resources(const char *d){
+    /* These are natural native decoder quotas, not injected child failures. */
+    size_t n=1600000;char *wire=malloc(2*n+2);require(wire!=NULL,"decoder resource input");wire[0]='[';
+    for(size_t i=0;i<n;i++){wire[2*i+1]='0';wire[2*i+2]=i+1==n?']':',';}wire[2*n+1]=0;
+    decode("[i64]",wire,2*n+1,NULL,"R204",d);free(wire);
+    size_t bytes=2*1024*1024;char *input=malloc(bytes+3);require(input!=NULL,"decoder overlimit input");input[0]='\"';memset(input+1,' ',bytes);input[bytes+1]='\"';input[bytes+2]=0;
+    native("M decode_limit\nF main text:str->result i64 str\n  L twice (cat text text)\n  R (json_decode i64 (cat (cat twice twice) \"0\"))\n",input,NULL,"R202",d);free(input);
+}
+static void decode_declared(const char *d){
+    const char *source="M decode_tests\nF main->result i64 str\n  R (json_decode i64 \"17\")\nX valid\n  A (= (main) (ok 17))\nX malformed\n  L decoded (json_decode i64 \"[\")\n  C decoded\n    ok n\n      A false\n    err message\n      A (= message \"invalid_json\")\nX strict\n  C (json_decode bool \"0\")\n    ok b\n      A false\n    err message\n      A (= message \"type_mismatch\")\n";
+    char file[4096],out[4096];snprintf(file,sizeof file,"%s/source.apx",d);snprintf(out,sizeof out,"%s/output",d);save(file,source);fflush(NULL);pid_t p=fork();require(p>=0,"fork decode tests");
+    if(!p){alarm(15);if(!freopen(out,"wb",stdout))_exit(126);execl("bin/apodexis","bin/apodexis","test",file,"--json",(char*)NULL);_exit(127);}
+    int status;require(waitpid(p,&status,0)==p&&WIFEXITED(status),"decode declared tests exit");char *text=readall(out);if(WEXITSTATUS(status))fprintf(stderr,"%s\n",text);require(!WEXITSTATUS(status),"actual source-declared decoder tests pass");
+    ApxValue *v=apx_json_parse(text,strlen(text)),*tests=apx_json_get(v,"tests");require(tests&&apx_json_length(tests)==3,"all decoder source tests discovered");free(text);apx_json_reset();
+}
 static void strings(const char *d){
     expression("i64","(str_chars \"aé😀\\0z\")","5",NULL,d);
     expression("i64","(str_chars \"\")","0",NULL,d);
@@ -170,7 +256,7 @@ static void semantic(void){
     require(apx_builtin_opcode("none")==29&&apx_builtin_opcode("str_chars")==30&&apx_builtin_opcode("with")==54,"stable old and additive opcodes");
 }
 int main(void){
-    char directory[]=".build/pure-libraries-XXXXXX";require(mkdtemp(directory)!=NULL,"owned native scratch");semantic();direct_runtime();strings(directory);numbers(directory);collections(directory);
+    char directory[]=".build/pure-libraries-XXXXXX";require(mkdtemp(directory)!=NULL,"owned native scratch");json_decoding(directory);decode_semantic();decode_resources(directory);decode_declared(directory);semantic();direct_runtime();strings(directory);numbers(directory);collections(directory);
     char path[4096];const char *files[]={"source.apx","input.json","output"};for(size_t i=0;i<3;i++){snprintf(path,sizeof path,"%s/%s",directory,files[i]);require(!unlink(path),"fixture cleanup");}require(!rmdir(directory),"scratch cleanup");
     printf("pure libraries: %u native cases, %u semantic cases, %u checks PASS\n",native_cases,semantic_cases,checks);return 0;
 }

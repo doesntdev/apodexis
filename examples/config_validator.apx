@@ -1,0 +1,100 @@
+M config_validator
+
+T Server struct
+  host:str
+  port:i64
+
+T Config struct
+  name:str
+  environment:str
+  server:Server
+  timeout_ms:i64
+  retries:i64
+  debug:bool
+
+T Validation struct
+  valid:bool
+  errors:[str]
+
+F blank value:str->bool
+  R (= (str_trim value) "")
+
+F has_nul value:str->bool
+  C (str_find value "\0")
+    some position
+      R true
+    none
+      R false
+
+F in_range value:i64 lower:i64 upper:i64->bool
+  R (& (>= value lower) (<= value upper))
+
+F known_environment value:str->bool
+  R (| (= value "development") (| (= value "staging") (= value "production")))
+
+F debug_allowed environment:str debug:bool->bool
+  R (! (& (= environment "production") debug))
+
+F validate config:Config->Validation
+  L errors (buf str 8)
+  ? (| (blank (. config name)) (has_nul (. config name)))
+    S errors (push errors "name_invalid")
+  ? (! (known_environment (. config environment)))
+    S errors (push errors "environment_invalid")
+  ? (| (blank (. (. config server) host)) (has_nul (. (. config server) host)))
+    S errors (push errors "host_invalid")
+  ? (! (in_range (. (. config server) port) 1 65535))
+    S errors (push errors "port_out_of_range")
+  ? (! (in_range (. config timeout_ms) 100 300000))
+    S errors (push errors "timeout_out_of_range")
+  ? (! (in_range (. config retries) 0 10))
+    S errors (push errors "retries_out_of_range")
+  ? (! (debug_allowed (. config environment) (. config debug)))
+    S errors (push errors "production_debug_enabled")
+  R (Validation valid=(= (count errors) 0) errors=(finish errors))
+
+F main document:str->Validation
+  C (json_decode Config document)
+    ok config
+      R (validate config)
+    err problem
+      R (Validation valid=false errors=[(cat "decode: " problem)])
+
+X valid_development
+  A (. (main "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}") valid)
+
+X valid_production
+  A (. (main "{\"name\":\"apx-service\",\"environment\":\"production\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":1000,\"retries\":3,\"debug\":false}") valid)
+
+X port_lower_boundary
+  A (. (main "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":1},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}") valid)
+
+X port_upper_boundary
+  A (. (main "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":65535},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}") valid)
+
+X port_zero
+  A (= (. (main "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":0},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}") errors) ["port_out_of_range"])
+
+X strict_boolean_port
+  A (= (. (main "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":true},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}") errors) ["decode: numeric_out_of_range"])
+
+X host_nul
+  A (= (. (main "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"bad\\u0000host\",\"port\":8080},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}") errors) ["host_invalid"])
+
+X unknown_field
+  A (= (. (main "{\"name\":\"apx-service\",\"environment\":\"development\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":1000,\"retries\":3,\"debug\":true,\"unexpected\":1}") errors) ["decode: extra_field"])
+
+X missing_fields
+  A (= (. (main "{}") errors) ["decode: missing_field"])
+
+X malformed_document
+  A (= (. (main "{") errors) ["decode: invalid_json"])
+
+X duplicate_fields
+  A (= (. (main "{\"name\":\"one\",\"name\":\"two\"}") errors) ["decode: duplicate_field"])
+
+X production_debug_is_rejected
+  A (= (. (main "{\"name\":\"apx-service\",\"environment\":\"production\",\"server\":{\"host\":\"127.0.0.1\",\"port\":8080},\"timeout_ms\":1000,\"retries\":3,\"debug\":true}") errors) ["production_debug_enabled"])
+
+X domain_errors_accumulate
+  A (= (. (main "{\"name\":\"\",\"environment\":\"unknown\",\"server\":{\"host\":\"\",\"port\":0},\"timeout_ms\":99,\"retries\":11,\"debug\":true}") errors) ["name_invalid" "environment_invalid" "host_invalid" "port_out_of_range" "timeout_out_of_range" "retries_out_of_range"])

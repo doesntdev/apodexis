@@ -865,6 +865,24 @@ static ApxValue *validate_static_value(const ApxSchema *s,ApxValue *input,unsign
     }
 }
 ApxValue *apx_validate_static(const ApxSchema *schema,ApxValue *input){return validate_static_value(schema,input,0);}
+ApxValue *apx_json_decode(const ApxSchema *schema,ApxValue *text){
+    require_kind(text,VSTR);
+    if(text->length>APX_INPUT)fail("R202","runtime","input_limit_exceeded","native input hard limit exceeded");
+    jmp_buf local; jmp_buf *previous=trap_target; trap_target=&local;
+    if(!setjmp(local)){
+        ApxValue *decoded=apx_validate_static(schema,parse_complete(text->text,text->length));
+        trap_target=previous;
+        return apx_variant("ok",decoded);
+    }
+    /* Restore BEFORE any result allocation or resource rethrow. Keep terminal
+     * diagnostics intact; never copy payload-bearing diagnostic messages. */
+    trap_target=previous;
+    if(!strcmp(error_phase,"abi_input") &&
+       (!strcmp(error_code,"A101")||!strcmp(error_code,"A102")||!strcmp(error_code,"A103")||
+        (!strcmp(error_code,"A104")&&!strcmp(error_kind,"duplicate_field"))))
+        return apx_variant("err",apx_string(error_kind,(int64_t)strlen(error_kind)));
+    longjmp(*previous,1);
+}
 
 /* Deterministic compact output; quota measured before publication. */
 struct Output { char *text;size_t length,capacity; };
