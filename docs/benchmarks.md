@@ -1,5 +1,42 @@
 # Local performance measurements
 
+Separate studies have different source revisions and timing boundaries. Do not
+combine their medians or relabel older observations as current-source results.
+
+## Compiled MCP reuse — 2026-11-07 UTC
+
+One unchanged `development` configuration-validator input, explicit limits and a
+single persistent native MCP session. Five warmup rounds preceded 31 scored calls
+per arm, with rotating order and no resampling. Every full execution record was
+checked; the native validator's separate qualification has 55 cases and 13 source
+tests, but this timing experiment uses only one case.
+
+| Operation | Median ms | Min–max ms |
+| --- | ---: | ---: |
+| Compile | 19.371 | 18.894–20.352 |
+| Cached invoke | 1.202 | 1.126–1.481 |
+| Source-per-call run | 17.466 | 16.867–18.484 |
+
+Cached invoke used 93.12% less median request time than source-per-call run on
+this workload. The parent-observed timer includes request/response JSON, IPC,
+server compilation or fresh restricted execution, and client decoding. Journal
+flush, assertions and release are outside. Compilation remains separate; guest
+work and fresh-worker overhead are not removed from invoke.
+
+Host: AMD Ryzen 9 7900X, Linux x86-64/glibc 2.43, logical CPU 23, unchanged
+performance governor. This author-produced local run is not independently
+reproduced or an isolated/fixed-frequency machine. It is not a core-instruction,
+whole-agent or comparative-language speed claim.
+
+[Public source `2c589ec4d3ce`](https://github.com/doesntdev/apodexis/commit/2c589ec4d3ce2701609a090e3e6e2dda26624832) ·
+[Full protocol and host/build details](../benchmarks/mcp_reuse/README.md) ·
+[Original integer-nanosecond observations](../benchmarks/mcp_reuse/samples.jsonl) ·
+[Results and fingerprints](../benchmarks/mcp_reuse/results.json).
+`python3 benchmarks/mcp_reuse/reaggregate.py` verifies the committed aggregates
+without running another timing campaign or adding a compiler dependency.
+
+## Cross-language native snapshot — 2026-11-06
+
 Measured 2026-11-06T14:12:54.166061+00:00. Author-produced on one host; not independently reproduced.
 
 **The result is mixed.** Native scalar/collection/schema/inlining and JSON optimizations are now included. Array JSON pipelines are much closer to these C/Rust implementations, but core-only gaps remain substantial. C, Rust and warmed-up JavaScript lead most non-control kernels; Python still wins some record-difference measurements. Apodexis has lower one-shot latency than Python or Node here, not a general compute-speed advantage.

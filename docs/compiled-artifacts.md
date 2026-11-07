@@ -43,9 +43,18 @@ with the returned string. These are tool arguments inside ordinary MCP
 `tools/call` requests, not standalone JSON-RPC messages.
 
 See the [configuration validator](config-validator.md#reuse-the-validator-through-mcp)
-for the same workflow on a larger tool. No C compiler, Python or Rust is needed at
-consumer tool use; the intact installed native distribution and platform build
-prerequisites are needed for the initial compile.
+for the same workflow on a larger tool. At installed-tool use, compilation needs
+the intact native distribution, its QBE/support objects, platform `as`/`ld` and
+glibc development linker files, not a C compiler, Python or Rust. Building the
+compiler itself from source still needs the documented C development toolchain.
+
+## Measured reuse
+
+For one fixed configuration-validator input, native MCP request medians were
+19.371 ms for compile, 1.202 ms for cached invoke and 17.466 ms for source-per-call
+run. This one-host, 31-scored-call-per-arm result includes JSON/IPC/native worker
+overhead, not just program computation. It is not a whole-agent speedup or a
+cross-language ranking. [Read the protocol, ranges and original observations](../benchmarks/mcp_reuse/README.md).
 
 ## Exact responses
 

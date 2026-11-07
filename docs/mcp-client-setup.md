@@ -128,12 +128,34 @@ The initialized notification has no `id` and receives no response. stdout must
 contain JSON-RPC only; logs or wrapper banners on stdout corrupt the protocol.
 Correlate responses by JSON-RPC `id`. This native server dispatches calls serially.
 
+## Reuse compiled tools in the same session
+
+After initialization/discovery, verify the authored source and execute its useful
+source tests. For repeated calls:
+
+1. `apodexis_compile` accepts inline `source` and returns an opaque `artifact_id`.
+   It checks tests but does not execute them; it is not a verify/test verdict.
+2. `apodexis_invoke` accepts the actual returned ID, JSON `input` and all three
+   RunLimits fields. It reuses the immutable image, not previous results; every
+   call has fresh worker, memory, fuel and I/O state.
+3. `apodexis_release` frees the handle/storage when finished.
+
+Keep one MCP connection/server process alive throughout this sequence. Starting
+one executable per call, reconnecting, `/reload-mcp` or releasing the handle ends
+its usability; save exact source and compile it again in a new session. Handles
+are not executable paths, portable packages or a persistent registry. The default
+operator-owned store is 8 artifacts / 64 MiB; models cannot raise storage limits.
+
+See [the exact responses, examples and shutdown rules](compiled-artifacts.md),
+[the reusable configuration validator](config-validator.md#reuse-the-validator-through-mcp)
+and [the separate measured round trips](../benchmarks/mcp_reuse/README.md).
+
 ## Authority and security boundary
 
 Source text and JSON input are inline request values; no API accepts a path.
 The six resources are fixed shipped data under `resources/`, and request/result shapes are checked against the bundled protocol catalog. The compiler/server has authority to read its own distribution data and launch only QBE, the platform assembler/linker and generated native workers. It exposes no client-selected paths, arbitrary process command, network request, environment access, roots, sampling, prompts, HTTP or host callback. Native computation workers have separate kernel syscall and resource restrictions.
 
-The native server exposes ten exercised tools, including inline module bundling, checked metadata/pseudocode and source-hash-guarded canonical repairs. Nothing mutates a source file implicitly: repairs return revised inline source only. Query `tools/list` and capabilities to discover the exact supported native interface. Clients must impose a finite timeout; this serial server does not currently interrupt an in-flight worker on an MCP cancellation notification.
+The native server exposes 13 exercised tools, including compile/invoke/release, inline module bundling, checked metadata/pseudocode and source-hash-guarded canonical repairs. Nothing mutates a source file implicitly: repairs return revised inline source only. Query `tools/list` and capabilities to discover the exact supported native interface. Clients must impose a finite timeout; this serial server does not currently interrupt an in-flight worker on an MCP cancellation notification.
 
 ## Troubleshooting
 
@@ -147,6 +169,9 @@ The native server exposes ten exercised tools, including inline module bundling,
   separate.
 - **Old or missing tools/resources:** test the server, then restart the client
   or refresh MCP discovery (`/reload-mcp`, `/mcp`, or the client's equivalent).
+- **A compiled handle returns `A203`:** use the same live session and an active
+  returned handle. Released/foreign/reconnected handles cannot be recovered by
+  editing their string; compile the retained source again.
 - **A request contains a filename:** read the file in the client and send its
   contents inline. Apodexis intentionally has no file/path authority.
 

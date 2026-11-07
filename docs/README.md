@@ -14,7 +14,7 @@ For authoring, read the [language specification entry point](specification.md).
 | [Configuration validator](config-validator.md) | Typed document validation and repeated MCP invocation. |
 | [Host capabilities](capabilities.md) | Operator grants and a two-module file-report walkthrough. |
 | [Binary distribution](binary-distribution.md) | Relocatable installed toolchain requirements and use. |
-| [Local benchmarks](benchmarks.md) | Cross-language timings, separate runtime improvements, source, ranges and limitations. |
+| [Local benchmarks](benchmarks.md) | Separate compiled-MCP round trips and historical cross-language/runtime measurements, with raw samples and limitations. |
 
 ## Implemented references
 

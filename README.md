@@ -57,6 +57,7 @@ than with established languages without a suitable comparison.
 | Modules | Explicit imports/exports, sibling-file CLI resolution and inline MCP bundles. |
 | Testing | `X` source tests; combined format/check/test verification; native conformance, regression and sandbox tests. |
 | Agent tooling | Local stdio MCP discovery, language resources, structured checking, guarded canonical repairs, execution, contracts and pseudocode. |
+| Compiled tools | Compile once to a session-scoped sealed handle, invoke fresh bounded JSON inputs without rebuilding, then release. No result memoization. |
 | Host capabilities | Policy-controlled file reads/writes, named environment reads, wall clock, entropy and exact-URL HTTP GET through a broker. Denied by default. |
 
 Important limits remain. There is no browser/WASM target, GPU backend, HTTP
@@ -346,6 +347,22 @@ of ELF and owned metadata. Compile does not execute source tests or grant host
 authority. See [compiled tools](docs/compiled-artifacts.md) for responses,
 operator-only limits and lifetime. These are MCP tools, not new CLI commands.
 
+### Measured compiled-tool reuse
+
+A fixed configuration-validator input measured these native MCP round trips:
+
+| Operation | Median ms |
+| --- | ---: |
+| Compile | 19.371 |
+| Cached invoke | 1.202 |
+| Source-per-call run | 17.466 |
+
+This author-produced, one-host run used five warmup rounds and 31 scored calls per
+arm. Cached invoke used 93.12% less median request time than source-per-call run here,
+including JSON/IPC/worker overhead. It is not core speed, a language ranking or a
+whole-agent speedup. [Original samples, exact source and protocol](benchmarks/mcp_reuse/README.md)
+keep this study separate from the [older cross-language tables](docs/benchmarks.md).
+
 The native repair mechanism currently supplies guarded canonical-source
 replacement, not arbitrary semantic program synthesis. Repairs never silently
 write host files. MCP source/input is inline and cannot self-grant host access.
@@ -427,7 +444,7 @@ CI on GitHub; report the commands actually executed and their results.
 - [Syntax](resources/language.md), [types/JSON ABI](resources/types.md) and
   [builtins/host operations](resources/stdlib.md).
 - [Native backend, compiler C API and boundaries](docs/qbe-native-backend.md).
-- [MCP client setup](docs/mcp-client-setup.md).
+- [MCP client setup](docs/mcp-client-setup.md) and [compiled-tool lifecycle](docs/compiled-artifacts.md).
 - [Host capability walkthrough](docs/capabilities.md).
 - [Documentation index](docs/README.md).
 - [Public changelog](CHANGELOG.md), [contribution guide](CONTRIBUTING.md) and

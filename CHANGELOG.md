@@ -17,6 +17,10 @@ Public source-release changes are recorded here.
   and targeted ASan/UBSan/leak coverage of the real MCP driver/store. Language,
   protocol, SDK and server versions are unchanged. No new performance ranking is
   claimed. See [compiled tools](docs/compiled-artifacts.md).
+- Published a separate fixed native-MCP latency study with 31 scored calls per
+  arm, original observations and offline reaggregation. Updated the website and
+  client guide for 13 tools; historical cross-language tables retain their source.
+  See [MCP reuse methodology](benchmarks/mcp_reuse/README.md).
 
 ### Native data-tooling follow-up
 
