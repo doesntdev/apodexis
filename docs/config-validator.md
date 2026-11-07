@@ -26,6 +26,33 @@ The valid fixture returns:
 {"valid":true,"errors":[]}
 ```
 
+## Reuse the validator through MCP
+
+Keep one initialized native MCP session open:
+
+1. Read `examples/config_validator.apx` in the client and supply its **exact inline
+   text** as `apodexis_compile` arguments `{"source": <that source string>}`.
+   The server does not read a filename. Compile checks but does not execute the
+   13 declared tests; run them separately with `apodexis_test` or use verify.
+2. On `status: "ok"`, retain the returned `artifact_id` and inspect `contract`.
+   Call `apodexis_invoke` with exactly that ID, the configuration **document
+   string** as `input`, and
+   `{"fuel":100000,"max_input_bytes":65536,"max_output_bytes":16384}` as `limits`.
+   Use the document string from `valid.input.json`, not that file's path and not
+   a configuration object. For the valid fixture the execution record has
+   `status: "ok"` and `output: {"valid":true,"errors":[]}`.
+3. Invoke the same ID with each different document string. No source or backend
+   build is repeated. Domain-invalid configurations still return successful
+   execution with `output.valid: false`; ABI/resource errors are execution errors.
+4. Release with `apodexis_release` arguments `{"artifact_id": <returned ID>}`.
+   A later rule revision needs a newly compiled handle; an existing old-version
+   handle stays independently immutable until released.
+
+The 55 cases remain unchanged inputs/limits, not a claim that compilation ran
+them. The [compiled tools guide](compiled-artifacts.md) defines response fields,
+sealed session storage, quotas, errors and shutdown. The default store is bounded
+and grants no file/network or other host access.
+
 ## Configuration contract
 
 Every field is required; extra fields are rejected, including inside `server`.

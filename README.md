@@ -328,12 +328,23 @@ reserved for JSON-RPC.
 | `apodexis_apply_repairs` | Apply selected current repairs to exact source, returning revised inline source. |
 | `apodexis_pseudocode` | Render checked source for human review. |
 | `apodexis_bundle` | Resolve explicitly supplied inline modules. |
+| `apodexis_compile` | Check source and compile main once into a session-scoped sealed artifact; source tests are not executed. |
+| `apodexis_invoke` | Execute a retained artifact with fresh worker/input/limits, without rechecking or rebuilding. |
+| `apodexis_release` | Close a known active artifact and free its session count/byte charge. |
 
 `apodexis_run` requires inline `source`, JSON `input` and a `limits` object.
 Include all three limit fields: `fuel`, `max_input_bytes` and `max_output_bytes`.
 For example, use `{"fuel":100000,"max_input_bytes":1048576,"max_output_bytes":1048576}`.
 Byte limits may be null to omit that caller-selected cap; hard runtime and worker
 bounds still apply. Send JSON null for a zero-parameter entrypoint's `input`.
+
+For repeated use, verify the source tests, call `apodexis_compile` with exactly
+`source`, then call `apodexis_invoke` with its returned `artifact_id`, `input` and
+unchanged explicit `limits`. Release the handle with `apodexis_release` when done.
+Handles belong only to that MCP session; the default store is 8 artifacts / 64 MiB
+of ELF and owned metadata. Compile does not execute source tests or grant host
+authority. See [compiled tools](docs/compiled-artifacts.md) for responses,
+operator-only limits and lifetime. These are MCP tools, not new CLI commands.
 
 The native repair mechanism currently supplies guarded canonical-source
 replacement, not arbitrary semantic program synthesis. Repairs never silently
@@ -395,6 +406,7 @@ not the development files or compiler bundle.
 make check
 make test
 make test-sanitize
+make test-compiled-artifacts-sanitize
 make dist
 ```
 

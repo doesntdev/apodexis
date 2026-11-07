@@ -59,6 +59,15 @@ check:
 $(BUILD)/test-conformance: tests/test_conformance.c $(BUILD)/apx_json.o
 	$(CC) $(CFLAGS) tests/test_conformance.c $(BUILD)/apx_json.o -o $@
 
+$(BUILD)/test-compiled-artifacts: tests/test_compiled_artifacts.c compiler/apx_hash.c compiler/apx_hash.h $(BUILD)/apx_json.o
+	$(CC) $(CFLAGS) tests/test_compiled_artifacts.c compiler/apx_hash.c $(BUILD)/apx_json.o -o $@
+
+# Instrument the actual driver/store and JSON arena, not just a test client.
+.PHONY: test-compiled-artifacts-sanitize
+test-compiled-artifacts-sanitize: all $(BUILD)/test-compiled-artifacts
+	$(CC) $(CFLAGS) -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined -DAPX_LIBRARY_ONLY -Icompiler compiler/apx_driver.c $(FRONTEND) $(DRIVER_HELPERS) runtime/apx_runtime.c -o $(BUILD)/apx-mcp-sanitized
+	ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 UBSAN_OPTIONS=halt_on_error=1 APX_TEST_MCP_BINARY=$(BUILD)/apx-mcp-sanitized $(BUILD)/test-compiled-artifacts
+
 $(BUILD)/test-mcp: tests/test_mcp.c $(BUILD)/apx_json.o
 	$(CC) $(CFLAGS) tests/test_mcp.c $(BUILD)/apx_json.o -o $@
 
@@ -167,7 +176,7 @@ test-sanitize: all
 	$(CC) $(CFLAGS) -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined -DAPX_LIBRARY_ONLY -Icompiler tests/test_pure_libraries.c $(FRONTEND) runtime/apx_runtime.c -o $(BUILD)/test-pure-libraries-sanitized
 	ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 UBSAN_OPTIONS=halt_on_error=1 $(BUILD)/test-pure-libraries-sanitized
 
-test: all test-support test-memory $(BUILD)/test-native-json $(BUILD)/test-native-calls $(BUILD)/test-native-shapes $(BUILD)/test-native-collections $(BUILD)/test-native-scalars $(BUILD)/test-conformance $(BUILD)/test-mcp $(BUILD)/test-regressions $(BUILD)/test-sandbox $(BUILD)/test-unicode $(BUILD)/test-frontend $(BUILD)/test-diagnostics $(BUILD)/test-diagnostic-transport $(BUILD)/test-authoring-syntax $(BUILD)/test-authoring-native $(BUILD)/test-reference-programs $(BUILD)/test-authoring-mcp $(BUILD)/test-pure-libraries $(BUILD)/test-modules $(BUILD)/test-host $(BUILD)/test-application-foundation
+test: all test-support test-memory $(BUILD)/test-compiled-artifacts $(BUILD)/test-native-json $(BUILD)/test-native-calls $(BUILD)/test-native-shapes $(BUILD)/test-native-collections $(BUILD)/test-native-scalars $(BUILD)/test-conformance $(BUILD)/test-mcp $(BUILD)/test-regressions $(BUILD)/test-sandbox $(BUILD)/test-unicode $(BUILD)/test-frontend $(BUILD)/test-diagnostics $(BUILD)/test-diagnostic-transport $(BUILD)/test-authoring-syntax $(BUILD)/test-authoring-native $(BUILD)/test-reference-programs $(BUILD)/test-authoring-mcp $(BUILD)/test-pure-libraries $(BUILD)/test-modules $(BUILD)/test-host $(BUILD)/test-application-foundation
 	$(BUILD)/test-native-json
 	$(BUILD)/test-native-calls
 	$(BUILD)/test-native-shapes
@@ -178,6 +187,7 @@ test: all test-support test-memory $(BUILD)/test-native-json $(BUILD)/test-nativ
 	$(BUILD)/test-native-collections
 	$(BUILD)/test-native-scalars
 	$(BUILD)/test-authoring-mcp
+	$(BUILD)/test-compiled-artifacts
 	$(BUILD)/test-reference-programs
 	$(BUILD)/test-authoring-syntax
 	$(BUILD)/test-authoring-native
@@ -211,6 +221,8 @@ dist: all
 	cp $(BUILD)/apx_runtime.o $(BUILD)/apx_start.o $(BUILD)/dist/apodexis-linux-amd64/.build/
 	cp -R resources examples fixtures $(BUILD)/dist/apodexis-linux-amd64/
 	cp docs/binary-distribution.md $(BUILD)/dist/apodexis-linux-amd64/README.md
+	mkdir -p $(BUILD)/dist/apodexis-linux-amd64/docs
+	cp docs/compiled-artifacts.md docs/config-validator.md $(BUILD)/dist/apodexis-linux-amd64/docs/
 	cp LICENSE THIRD_PARTY_NOTICES.md $(BUILD)/dist/apodexis-linux-amd64/
 	cp third_party/qbe/LICENSE $(BUILD)/dist/apodexis-linux-amd64/QBE-LICENSE
 	cp third_party/qbe/LICENSE $(BUILD)/dist/apodexis-linux-amd64/third_party/qbe/LICENSE

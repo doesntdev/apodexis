@@ -72,6 +72,34 @@
             "items": {
               "type": "string"
             }
+          },
+          "compiled_artifacts": {
+            "type": "object",
+            "properties": {
+              "scope": {
+                "const": "session"
+              },
+              "storage": {
+                "const": "sealed_memfd"
+              },
+              "max_artifacts": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 64
+              },
+              "max_bytes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 268435456
+              }
+            },
+            "required": [
+              "scope",
+              "storage",
+              "max_artifacts",
+              "max_bytes"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
@@ -89,7 +117,8 @@
           "operations",
           "platform_tools",
           "sandbox",
-          "mcp_tools"
+          "mcp_tools",
+          "compiled_artifacts"
         ],
         "additionalProperties": false
       },
@@ -4051,6 +4080,1079 @@
         ],
         "additionalProperties": false
       }
+    },
+    {
+      "name": "apodexis_compile",
+      "description": "Check complete UTF-8 source and build main once into a bounded session-scoped sealed native artifact. Source tests are checked, not executed. For modules first use apodexis_bundle. Retain artifact_id for invoke; release it when finished. No host authority is granted.",
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "schema": {
+                "const": "apodexis.compile_response.v1"
+              },
+              "status": {
+                "const": "ok"
+              },
+              "language": {
+                "const": "apodexis"
+              },
+              "version": {
+                "const": "0.1.11"
+              },
+              "diagnostics": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/Diagnostic"
+                }
+              },
+              "artifact_id": {
+                "type": "string",
+                "pattern": "^apxa1:[0-9a-f]{32}$",
+                "minLength": 38,
+                "maxLength": 38
+              },
+              "source_hash": {
+                "type": "string"
+              },
+              "source_text_hash": {
+                "type": "string"
+              },
+              "contract_hash": {
+                "type": "string"
+              },
+              "program_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$",
+                "minLength": 64,
+                "maxLength": 64
+              },
+              "stored_bytes": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "toolchain": {
+                "type": "object",
+                "properties": {
+                  "backend": {
+                    "const": "qbe"
+                  },
+                  "target": {
+                    "const": "amd64_sysv"
+                  },
+                  "compiler_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                    "minLength": 64,
+                    "maxLength": 64
+                  },
+                  "qbe_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                    "minLength": 64,
+                    "maxLength": 64
+                  },
+                  "runtime_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                    "minLength": 64,
+                    "maxLength": 64
+                  },
+                  "start_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                    "minLength": 64,
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "backend",
+                  "target",
+                  "compiler_sha256",
+                  "qbe_sha256",
+                  "runtime_sha256",
+                  "start_sha256"
+                ],
+                "additionalProperties": false
+              },
+              "contract": {
+                "$ref": "#/$defs/EntrypointContractResponse"
+              }
+            },
+            "required": [
+              "schema",
+              "status",
+              "language",
+              "version",
+              "diagnostics",
+              "artifact_id",
+              "source_hash",
+              "source_text_hash",
+              "contract_hash",
+              "program_sha256",
+              "stored_bytes",
+              "toolchain",
+              "contract"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "schema": {
+                "const": "apodexis.compile_response.v1"
+              },
+              "status": {
+                "const": "error"
+              },
+              "language": {
+                "const": "apodexis"
+              },
+              "version": {
+                "const": "0.1.11"
+              },
+              "diagnostics": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "$ref": "#/$defs/Diagnostic"
+                }
+              }
+            },
+            "required": [
+              "schema",
+              "status",
+              "language",
+              "version",
+              "diagnostics"
+            ],
+            "additionalProperties": false
+          }
+        ],
+        "$defs": {
+          "ContractDefinition": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "struct"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "fields": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/ContractField"
+                    }
+                  }
+                },
+                "required": [
+                  "kind",
+                  "name",
+                  "fields"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "enum"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "variants": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/ContractVariant"
+                    }
+                  }
+                },
+                "required": [
+                  "kind",
+                  "name",
+                  "variants"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "ContractField": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "$ref": "#/$defs/ContractType"
+              }
+            },
+            "required": [
+              "name",
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          "ContractParameter": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "$ref": "#/$defs/ContractType"
+              }
+            },
+            "required": [
+              "name",
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          "ContractType": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "bool"
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "i64"
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "f64"
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "str"
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "array"
+                  },
+                  "items": {
+                    "$ref": "#/$defs/ContractType"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "items"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "builder"
+                  },
+                  "items": {
+                    "$ref": "#/$defs/ContractType"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "items"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "option"
+                  },
+                  "item": {
+                    "$ref": "#/$defs/ContractType"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "item"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "result"
+                  },
+                  "ok": {
+                    "$ref": "#/$defs/ContractType"
+                  },
+                  "error": {
+                    "$ref": "#/$defs/ContractType"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "ok",
+                  "error"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "named"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "name"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "map"
+                  },
+                  "values": {
+                    "$ref": "#/$defs/ContractType"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "values"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "ContractVariant": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "fields": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/ContractField"
+                }
+              }
+            },
+            "required": [
+              "name",
+              "fields"
+            ],
+            "additionalProperties": false
+          },
+          "Diagnostic": {
+            "type": "object",
+            "properties": {
+              "schema": {
+                "type": "string",
+                "const": "apodexis.diagnostic.v1"
+              },
+              "code": {
+                "type": "string"
+              },
+              "severity": {
+                "type": "string"
+              },
+              "phase": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "span": {
+                "$ref": "#/$defs/SourceSpan"
+              }
+            },
+            "required": [
+              "schema",
+              "code",
+              "severity",
+              "phase",
+              "kind",
+              "message"
+            ],
+            "additionalProperties": false
+          },
+          "EntrypointContract": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "parameters": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/ContractParameter"
+                }
+              },
+              "return_type": {
+                "$ref": "#/$defs/ContractType"
+              },
+              "definitions": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/ContractDefinition"
+                }
+              }
+            },
+            "required": [
+              "name",
+              "parameters",
+              "return_type",
+              "definitions"
+            ],
+            "additionalProperties": false
+          },
+          "EntrypointContractResponse": {
+            "type": "object",
+            "properties": {
+              "schema": {
+                "type": "string",
+                "const": "apodexis.entrypoint_contract_response.v1"
+              },
+              "status": {
+                "type": "string"
+              },
+              "language": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "source_hash": {
+                "type": "string"
+              },
+              "contract_hash": {
+                "type": "string"
+              },
+              "contract": {
+                "$ref": "#/$defs/EntrypointContract"
+              }
+            },
+            "required": [
+              "schema",
+              "status",
+              "language",
+              "version",
+              "source_hash",
+              "contract_hash",
+              "contract"
+            ],
+            "additionalProperties": false
+          },
+          "SourceSpan": {
+            "type": "object",
+            "properties": {
+              "start_byte": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end_byte": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "start_line": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "start_column": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end_line": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end_column": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "start_byte",
+              "end_byte",
+              "start_line",
+              "start_column",
+              "end_line",
+              "end_column"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "result_schemas": [
+        "apodexis.compile_response.v1"
+      ]
+    },
+    {
+      "name": "apodexis_invoke",
+      "description": "Invoke an active artifact from this MCP session without rechecking or rebuilding source. Supply input and all unchanged RunLimits fields. Each call starts a fresh restricted native worker; there is no result cache or host authority. Returns the same execution record as apodexis_run.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "artifact_id": {
+            "type": "string",
+            "pattern": "^apxa1:[0-9a-f]{32}$",
+            "minLength": 38,
+            "maxLength": 38
+          },
+          "input": {},
+          "limits": {
+            "$ref": "#/$defs/RunLimits"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "input",
+          "limits"
+        ],
+        "additionalProperties": false,
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$defs": {
+          "RunLimits": {
+            "type": "object",
+            "properties": {
+              "fuel": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "max_input_bytes": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "max_output_bytes": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "fuel",
+              "max_input_bytes",
+              "max_output_bytes"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "output_schema": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/ExecutionRecord"
+          },
+          {
+            "$ref": "#/$defs/McpAdapterErrorResponse"
+          }
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$defs": {
+          "Diagnostic": {
+            "type": "object",
+            "properties": {
+              "schema": {
+                "type": "string",
+                "const": "apodexis.diagnostic.v1"
+              },
+              "code": {
+                "type": "string"
+              },
+              "severity": {
+                "type": "string"
+              },
+              "phase": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "span": {
+                "$ref": "#/$defs/SourceSpan"
+              }
+            },
+            "required": [
+              "schema",
+              "code",
+              "severity",
+              "phase",
+              "kind",
+              "message"
+            ],
+            "additionalProperties": false
+          },
+          "ExecutionRecord": {
+            "type": "object",
+            "properties": {
+              "schema": {
+                "type": "string",
+                "const": "apodexis.execution_record.v1"
+              },
+              "status": {
+                "type": "string"
+              },
+              "language": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "protocol_version": {
+                "type": "string"
+              },
+              "sdk_version": {
+                "type": "string"
+              },
+              "source_hash": {
+                "type": "string"
+              },
+              "input_hash": {
+                "type": "string"
+              },
+              "contract_hash": {
+                "type": "string"
+              },
+              "limits": {
+                "$ref": "#/$defs/RunLimits"
+              },
+              "fuel_used": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "output": {},
+              "output_hash": {
+                "type": "string"
+              },
+              "diagnostic": {
+                "$ref": "#/$defs/Diagnostic"
+              }
+            },
+            "required": [
+              "schema",
+              "status",
+              "language",
+              "version",
+              "protocol_version",
+              "sdk_version",
+              "input_hash",
+              "limits",
+              "fuel_used"
+            ],
+            "additionalProperties": false
+          },
+          "McpAdapterErrorResponse": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "schema": {
+                    "type": "string",
+                    "const": "apodexis.mcp_adapter_error.v1"
+                  },
+                  "status": {
+                    "type": "string",
+                    "const": "error"
+                  },
+                  "code": {
+                    "type": "string",
+                    "const": "source_limit_exceeded"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "actual_bytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "max_bytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "schema",
+                  "status",
+                  "code",
+                  "message",
+                  "actual_bytes",
+                  "max_bytes"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "schema": {
+                    "type": "string",
+                    "const": "apodexis.mcp_adapter_error.v1"
+                  },
+                  "status": {
+                    "type": "string",
+                    "const": "error"
+                  },
+                  "code": {
+                    "type": "string",
+                    "const": "timeout"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "timeout_ms": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "schema",
+                  "status",
+                  "code",
+                  "message",
+                  "timeout_ms"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "RunLimits": {
+            "type": "object",
+            "properties": {
+              "fuel": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "max_input_bytes": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "max_output_bytes": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "fuel",
+              "max_input_bytes",
+              "max_output_bytes"
+            ],
+            "additionalProperties": false
+          },
+          "SourceSpan": {
+            "type": "object",
+            "properties": {
+              "start_byte": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end_byte": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "start_line": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "start_column": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end_line": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end_column": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "start_byte",
+              "end_byte",
+              "start_line",
+              "start_column",
+              "end_line",
+              "end_column"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "result_schemas": [
+        "apodexis.execution_record.v1",
+        "apodexis.mcp_adapter_error.v1"
+      ]
+    },
+    {
+      "name": "apodexis_release",
+      "description": "Release an active session artifact, closing its sealed executable and freeing its byte/count charge. Unknown, already released and foreign-session handles fail explicitly; release is not silently idempotent.",
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "artifact_id": {
+            "type": "string",
+            "pattern": "^apxa1:[0-9a-f]{32}$",
+            "minLength": 38,
+            "maxLength": 38
+          }
+        },
+        "required": [
+          "artifact_id"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schema": {
+            "const": "apodexis.release_response.v1"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "error"
+            ]
+          },
+          "language": {
+            "const": "apodexis"
+          },
+          "version": {
+            "const": "0.1.11"
+          },
+          "diagnostics": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Diagnostic"
+            }
+          },
+          "artifact_id": {
+            "type": "string",
+            "pattern": "^apxa1:[0-9a-f]{32}$",
+            "minLength": 38,
+            "maxLength": 38
+          },
+          "released": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "schema",
+          "status",
+          "language",
+          "version",
+          "diagnostics",
+          "artifact_id",
+          "released"
+        ],
+        "additionalProperties": false,
+        "oneOf": [
+          {
+            "properties": {
+              "status": {
+                "const": "ok"
+              },
+              "released": {
+                "const": true
+              },
+              "diagnostics": {
+                "maxItems": 0
+              }
+            }
+          },
+          {
+            "properties": {
+              "status": {
+                "const": "error"
+              },
+              "released": {
+                "const": false
+              },
+              "diagnostics": {
+                "minItems": 1
+              }
+            }
+          }
+        ],
+        "$defs": {
+          "Diagnostic": {
+            "type": "object",
+            "properties": {
+              "schema": {
+                "type": "string",
+                "const": "apodexis.diagnostic.v1"
+              },
+              "code": {
+                "type": "string"
+              },
+              "severity": {
+                "type": "string"
+              },
+              "phase": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "span": {
+                "$ref": "#/$defs/SourceSpan"
+              }
+            },
+            "required": [
+              "schema",
+              "code",
+              "severity",
+              "phase",
+              "kind",
+              "message"
+            ],
+            "additionalProperties": false
+          },
+          "SourceSpan": {
+            "type": "object",
+            "properties": {
+              "start_byte": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end_byte": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "start_line": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "start_column": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end_line": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end_column": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "start_byte",
+              "end_byte",
+              "start_line",
+              "start_column",
+              "end_line",
+              "end_column"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "result_schemas": [
+        "apodexis.release_response.v1"
+      ]
     }
   ],
   "resources": [
@@ -4743,6 +5845,70 @@
         "pseudocode_hash",
         "text",
         "nodes"
+      ],
+      "optional_top_level_fields": []
+    },
+    {
+      "schema": "apodexis.compile_response.v1",
+      "producers": [
+        "apodexis_compile"
+      ],
+      "required_top_level_fields": [
+        "schema",
+        "status",
+        "language",
+        "version",
+        "diagnostics"
+      ],
+      "optional_top_level_fields": [
+        "artifact_id",
+        "source_hash",
+        "source_text_hash",
+        "contract_hash",
+        "program_sha256",
+        "stored_bytes",
+        "toolchain",
+        "contract"
+      ]
+    },
+    {
+      "schema": "apodexis.release_response.v1",
+      "producers": [
+        "apodexis_release"
+      ],
+      "required_top_level_fields": [
+        "schema",
+        "status",
+        "language",
+        "version",
+        "diagnostics",
+        "artifact_id",
+        "released"
+      ],
+      "optional_top_level_fields": []
+    },
+    {
+      "schema": "apodexis.native_capabilities.v1",
+      "producers": [
+        "apodexis_capabilities"
+      ],
+      "required_top_level_fields": [
+        "schema",
+        "status",
+        "language",
+        "version",
+        "backend",
+        "target",
+        "compiler",
+        "runtime",
+        "requires_rust",
+        "requires_python",
+        "third_party_compiler_backends",
+        "operations",
+        "platform_tools",
+        "sandbox",
+        "mcp_tools",
+        "compiled_artifacts"
       ],
       "optional_top_level_fields": []
     }

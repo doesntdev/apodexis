@@ -163,6 +163,24 @@ Compiler-issued canonical repairs require the current exact `source_text_hash`
 and unchanged repair objects; they return revised inline source, not file writes.
 Verify again after applying them.
 
+### Reuse compiled source in one MCP session
+
+After verifying source tests, call `apodexis_compile` with exactly inline `source`,
+then `apodexis_invoke` with its returned `artifact_id`, JSON `input` and all three
+unchanged RunLimits fields. Compile checks but does not execute source tests.
+Invoke starts a fresh restricted worker from the sealed retained ELF without
+source/backend work; release with `apodexis_release` when done. These are MCP-only
+tools, not new CLI commands. Keep `.build/` writable for bounded worker channels.
+
+The store is session-only, defaults to 8 active artifacts / 64 MiB of ELF and
+owned metadata, and closes on EOF or controlled shutdown. Operator-only startup
+settings `APX_MCP_MAX_ARTIFACTS` (1..64) and `APX_MCP_MAX_ARTIFACT_BYTES`
+(1..268435456 bytes) accept decimal digits only; invalid settings fail MCP startup.
+Actual limits are in `apodexis_capabilities.compiled_artifacts`. Models cannot set
+storage limits or grant host authority. Linux sealed memfd and execveat support
+is required for these tools. See `docs/compiled-artifacts.md` in the bundle for
+full schemas/lifetime and `docs/config-validator.md` for repeated validator use.
+
 ## Host authority and security
 
 Pure programs have no ambient file, network, environment, clock, entropy or

@@ -14,7 +14,7 @@ static ApxValue *response(const char *all,int id){const char *p=all;while(*p){co
 static ApxValue *structured(const char *all,int id,int ok){ApxValue *result=response(all,id),*value=apx_json_get(result,"structuredContent");const char *status=apx_json_string(apx_json_get(value,"status"));require(status&&!strcmp(status,ok?"ok":"error"),"expected native tool status");require(apx_json_integer(apx_json_get(result,"isError"))==!ok,"MCP error flag matches status");return value;}
 static void description_tests(const char *all){
     ApxValue *tools=apx_json_get(response(all,8),"tools");
-    require(apx_json_length(tools)==10,"complete tool description surface");
+    require(apx_json_length(tools)==13,"complete tool description surface");
     const char *verify=NULL,*check=NULL,*format=NULL;
     for(size_t i=0;i<apx_json_length(tools);i++){
         ApxValue *tool=apx_json_item(tools,i);

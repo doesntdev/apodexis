@@ -177,6 +177,35 @@ X cases
    succeed. Supply the same exact final source you tested, without fences or
    pseudocode. Do not assert that tests ran when no tool executed them.
 
+## Reusable native tools over MCP
+
+For repeated inputs after verification, call `apodexis_compile` with exactly
+`{"source": <complete UTF-8 source>}`. For imports first bundle inline modules,
+then compile the returned assembled source. Compilation checks declared tests
+but does not execute them; use `apodexis_test` or `apodexis_verify` for that.
+
+On compile success retain `artifact_id` and inspect the complete returned
+entrypoint `contract`, source identities, `program_sha256`, `toolchain` and
+`stored_bytes`. Invoke with exactly `artifact_id`, JSON `input` and the same
+three-field `limits` used by `apodexis_run`. Each invoke starts a fresh restricted
+native worker without source rechecking/building or result memoization. Its
+execution-record schema and fuel/output/error semantics are unchanged. No host
+policy or uploaded executable is accepted.
+
+Call `apodexis_release` with exactly `artifact_id` when finished. Handles are
+opaque `apxa1:` plus 32 lowercase hex characters and valid only in their originating
+session. Unknown/released/foreign handles fail with A203, not silent success;
+malformed IDs/arguments are invalid JSON-RPC requests. Calls without a request ID
+have no lifecycle/execution effects. The default sealed-memfd store allows 8
+artifacts / 64 MiB of ELF plus owned metadata; A204 rejects excess admission
+without disturbing live handles, and A205 reports storage/publication failures.
+EOF and controlled shutdown clear all entries. Actual operator-configured limits
+are in `apodexis_capabilities.compiled_artifacts`; models cannot set storage limits.
+See the catalog's strict compile/invoke/release schemas and the
+[compiled tools guide](../docs/compiled-artifacts.md) for exact fields and startup
+settings. CLI operations, language syntax, host denial and source-test APIs remain
+unchanged.
+
 ## Modules and imports
 
 Use `I alias "module_key"` at top level, `V symbol` to export a function or type,

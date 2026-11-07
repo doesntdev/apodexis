@@ -4,6 +4,20 @@ Public source-release changes are recorded here.
 
 ## Unreleased
 
+### Session-scoped compiled MCP tools
+
+- Added `apodexis_compile`, `apodexis_invoke` and `apodexis_release` to the native
+  MCP catalog, bringing discovery to 13 tools. Source tests are checked during
+  compile, not executed; test/verify and ordinary CLI/run behavior stay separate.
+- Retain sealed executable memfds and owned identity metadata under bounded
+  per-session count/byte admission. Repeated invokes use fresh restricted workers
+  without source rechecking/building or result memoization. Explicit release,
+  EOF and controlled shutdown reclaim entries.
+- Added strict schemas, operator-only startup limits, lifecycle/error regressions
+  and targeted ASan/UBSan/leak coverage of the real MCP driver/store. Language,
+  protocol, SDK and server versions are unchanged. No new performance ranking is
+  claimed. See [compiled tools](docs/compiled-artifacts.md).
+
 ### Native data-tooling follow-up
 
 - Checked indexing of non-`i64` arrays now avoids constructing boxed integer
