@@ -168,3 +168,11 @@ retain the old value. Safe `map_get` and `array_get` return options.
 Host calls have fixed signatures: fs_read/env_get/random_hex/http_get return
 `result str str`; fs_write/clock_ms return `result i64 str`. Their result error is
 an ordinary recoverable capability/operation error, separate from runtime traps.
+
+## JSON encoding and ordinary HTTP records
+
+`json_encode value -> str` uses the same checked JSON-eligible concrete types as
+`json_decode`, including its map-payload exception; it adds no generic/dynamic
+JSON type. Nonfinite nested numbers trap. The Body/Header/Request/Response types
+in `examples/http_client/http.apx` are ordinary exported module declarations,
+not reserved names. Import them explicitly; see `docs/http-client.md`.

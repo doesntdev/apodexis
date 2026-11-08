@@ -34,6 +34,21 @@ native compilation creates temporary directories there. Generated applications
 need a compatible Linux kernel and runtime glibc, not the compiler, source,
 QBE or glibc development files. See [binary installation](binary-distribution.md).
 
+## Typed projection and repo brief
+
+Pure intrinsic 57, `json_decode_fields`, lowers its concrete type marker to the
+same static schema descriptor as `json_decode` (55), then evaluates its text
+operand once and calls the projection-mode runtime entrypoint. Struct selection
+alone ignores extras recursively; strict entrypoint validation, parser, encoder,
+map/tagged wrapper checks and outer trap/resource behavior remain unchanged.
+Module type-reference rewriting includes local/imported and qualified exported
+markers. There is no dynamic JSON or new ABI/backend path.
+
+The [repo brief example](repo-brief.md) runs fetch/validation/pagination/reporting
+inside compiled Apodexis using the existing HTTP module and fixed broker grants.
+Its Python3 CLI and served fixtures/oracle are optional; default native
+`all/check/test` remain C/libc only.
+
 ## Implementation layout
 
 | Component | Responsibility |
@@ -45,7 +60,9 @@ QBE or glibc development files. See [binary installation](binary-distribution.md
 | `compiler/apx_unicode.[ch]` | Pinned canonical string classification used in formatting and `apx1` identities. |
 | `compiler/apx_driver.c` | CLI, stdio MCP, bundled-schema validation and bounded QBE/as/ld/worker orchestration without a shell. |
 | `compiler/apx_modules.[ch]` | Deterministic sibling-file/inline module resolution, exports and namespace lowering. |
-| `compiler/apx_host.[ch]` | Trusted explicit-policy broker for scoped file, environment, clock, entropy and exact-URL GET operations. |
+| `compiler/apx_host.[ch]` | Trusted explicit-policy broker for files, environment, clock, entropy, HTTP(S) and named-key crypto operations. |
+| `compiler/apx_http.[ch]`, `apx_http_main.c` | Bounded libc HTTP and optional system OpenSSL TLS helper. |
+| `compiler/apx_pqc.[ch]`, `apx_pqc_main.c`, `apx_pqc_profile.[ch]` | Strict crypto requests, optional static OpenSSL CMS helper, key provisioning and public ASN.1 profile validation. |
 | `runtime/apx_runtime.[ch]` | Immutable values, pure libraries, strict JSON ABI, checked operations, builders, fuel/traps and native harness. |
 | `runtime/apx_start.s` | Native startup support for direct assembly/linking. |
 | `third_party/qbe/` | Vendored backend source and upstream MIT license. |
@@ -415,8 +432,11 @@ cross-language qualification remain separate measurements.
 - **Host effects:** fixed typed calls use an inherited trusted broker channel,
   never direct worker host access. An operator-owned CLI `run --capabilities`
   policy grants specific operations. Tests, `verify`, ordinary MCP and artifacts
-  without a trusted broker channel remain ungranted. The optional HTTP adapter
-  uses `/usr/bin/curl`; it is not bundled or required for pure programs.
+  without a trusted broker channel remain ungranted. Native HTTP uses a libc-only
+  first-party helper. Optional OpenSSL HTTPS is separately built/packaged; neither
+  curl nor libcurl is used. Application seal/open use separate named key grants
+  and a static OpenSSL 4.1+ CMS helper, not direct worker crypto or raw key access.
+  See [HTTP client](http-client.md) and [PQ encryption](post-quantum.md).
 - **MCP:** local newline-delimited stdio JSON-RPC, serial dispatch and bounded
   frames. Cancellation does not interrupt an in-flight worker. Use a finite
   client tool timeout around 130 seconds, separate from connection/startup
@@ -450,3 +470,17 @@ Packaging changes also need an extracted, relocated bundle smoke and a generated
 application run. These commands describe the contributor gates, not an assertion
 that they have run for any particular revision. See
 [CONTRIBUTING.md](../CONTRIBUTING.md) for evidence and compatibility requirements.
+
+## Native HTTP transport and appended encoder
+
+`json_encode` (56) uses the existing generic boxed QBE builtin path and checked
+JSON eligibility. Its internal encoder preserves resource traps and rejects
+nonfinite numbers recursively. `http_request` (1007) extends the existing host
+channel without changing worker seccomp or the FD3 sealed-image conflict guard.
+A trusted CLI broker validates the complete request/grant before launching one
+bounded first-party helper. The broker owns an absolute deadline including
+DNS, connect, optional verified TLS and IPC, and exact helper reaping. Only the
+optional TLS helper dynamically links system OpenSSL. The separately optional
+crypto helper statically links its verified OpenSSL 4.1+ backend; the compiler
+and generated programs remain libc-only.
+See [HTTP client](http-client.md) for the wire, typed module and error semantics.

@@ -90,7 +90,7 @@ unsafe index. First use a `?` or `W` to prove an index is in bounds, then call `
 User functions require positional arguments in declared order: `(add 2 3)`.
 Named arguments are reserved for struct constructors; `(add left=2 right=3)` is
 rejected with `N104`. Builtins use positional arguments; `buf`, `map`, and
-`json_decode` take a concrete type marker first, not a runtime expression. Struct
+`json_decode` and `json_decode_fields` take a concrete type marker first, not a runtime expression. Struct
 constructors require every field exactly once as named arguments: `(Point x=2 y=3)`. Field reads use `point.x`, or the canonical
 `(. point x)` where `x` is the declared field name. There is no array/struct
 element assignment: construct a new value.
@@ -239,13 +239,20 @@ is a typed string-keyed immutable map. Array updates return new values; use
 `(with record field=value ...)` for typed immutable record updates. Neither form
 changes old aliases. See the complete builtin signatures in the stdlib resource.
 
-Host operations are `fs_read`, `fs_write`, `env_get`, `clock_ms`, `random_hex`, and
-`http_get`. They return typed results, not ambient access. By default all return
-`(err "capability_denied")`. Only CLI `run --capabilities policy.json` activates
-an operator-owned policy. Tests, verify and ordinary MCP calls stay ungranted.
+Host operations are `fs_read`, `fs_write`, `env_get`, `clock_ms`, `random_hex`,
+`http_get`, `http_request`, `pqc_seal` and `pqc_open`. They return typed results,
+not ambient access. By default all return
+`(err "capability_denied")`. CLI `run --capabilities policy.json` activates an
+operator-owned policy. A separate `serve --manifest` mode can bind fixed policies
+to reviewed named tools; callers cannot submit grants. Tests, verify and default
+authoring MCP calls stay ungranted. Serving mode denies application-key operations.
+See [tool serving](../docs/tool-serving.md) for the operator boundary.
 A trusted native broker enforces each request; the compiled worker cannot open
 files, use sockets or spawn processes directly. Host observations/effects are
 not deterministic; pure computation and default-denied execution remain so.
+Application encryption uses an optional helper and named v3 operator key grants.
+Key generation is operator CLI only, not a builtin/MCP tool. Read the stdlib and
+[post-quantum guide](../docs/post-quantum.md), rather than putting keys in source.
 
 There are still no closures, general function values, sorting builtin, arbitrary
 host commands, database adapters, HTTP listeners or automatic package registry.

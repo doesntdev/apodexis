@@ -72,7 +72,7 @@ static int assemble_module(Link *l,Module *m,int root_module){size_t pos=0;int i
   if(top&&!strcmp(head,"F")){for(size_t i=2;i<count;i++)if(!strcmp(t[i].text,":")||!strcmp(t[i].text,"->")){size_t next=type_ref(l,m,t,count,i+1,repl,0);i=next?next-1:i;}}
   else if(in_type&&!top){for(size_t i=1;i<count;i++)if(!strcmp(t[i].text,":")){size_t next=type_ref(l,m,t,count,i+1,repl,0);i=next?next-1:i;}}
   else if(!top&&!strcmp(head,"L")&&count>3&&!strcmp(t[2].text,":"))type_ref(l,m,t,count,3,repl,0);
-  for(size_t i=0;i+1<count&&!l->error;i++)if(!strcmp(t[i].text,"(")){if(!rename_ref(l,m,t,count,i+1,repl,0))break;if(i+2<count&&(!strcmp(t[i+1].text,"buf")||!strcmp(t[i+1].text,"map")||!strcmp(t[i+1].text,"json_decode")))type_ref(l,m,t,count,i+2,repl,0);}
+  for(size_t i=0;i+1<count&&!l->error;i++)if(!strcmp(t[i].text,"(")){if(!rename_ref(l,m,t,count,i+1,repl,0))break;if(i+2<count&&(!strcmp(t[i+1].text,"buf")||!strcmp(t[i+1].text,"map")||!strcmp(t[i+1].text,"json_decode")||!strcmp(t[i+1].text,"json_decode_fields")))type_ref(l,m,t,count,i+2,repl,0);}
   /* A remaining namespace token is not a legal field/binding expression. */
   for(size_t i=0;i<count&&!l->error;i++)if(!strcmp(t[i].text,"::")&&!repl[i])l->error="invalid_qualified_reference";
   size_t cursor=0;for(size_t i=0;i<count&&!l->error;i++){if(!emit(l,m->source+start+cursor,t[i].start-cursor))break;if(!emit(l,repl[i]?repl[i]:t[i].text,repl[i]?strlen(repl[i]):strlen(t[i].text)))break;cursor=t[i].end;}

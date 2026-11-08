@@ -2,7 +2,10 @@
 
 Pure Apodexis programs do not have ambient host access. Supported host operations
 return typed results through a trusted broker, enabled only by an operator-owned
-policy passed to **CLI `run --capabilities`**.
+policy passed to **CLI `run --capabilities`**, or fixed per tool in the separate
+operator-configured **`serve --manifest`** mode. See [serving tools](tool-serving.md)
+for immutable tool policies and broker-held HTTP credential references. Serving
+mode deliberately rejects application-crypto grants.
 
 Read the [stdlib host-operation contract](../resources/stdlib.md#explicit-host-operations)
 for exact signatures, bounds and failure behavior. Do not accept a policy supplied
@@ -17,14 +20,17 @@ by untrusted generated source as if it were an operator grant.
 | `env_get` | Explicitly named environment variables. |
 | `clock_ms` | Explicit wall-clock grant. |
 | `random_hex` | Explicit entropy grant. |
-| `http_get` | Exact HTTP(S) URLs; the optional fixed `/usr/bin/curl` adapter. |
+| `http_get` | Exact raw HTTP(S) URLs; legacy UTF-8 2xx wrapper over native transport. |
+| `http_request` | Strict v2/v3 origin, slash-prefix, method and header grants; bounded native requests. |
+| `pqc_seal` | V3 named slot with an operator-provisioned public-key snapshot. |
+| `pqc_open` | V3 named slot with a private-key snapshot; independent of seal authority. |
 
-No policy means no grants. Source tests, `verify`, ordinary MCP calls and generated
+No policy means no grants. Source tests, `verify`, default authoring MCP calls and generated
 standalone programs without a trusted broker channel remain ungranted. They cannot
 self-authorize I/O. The native worker's seccomp restrictions remain active even
 when a trusted broker services a permitted request.
 
-Clock/entropy/network/file observations are external inputs or effects, not a
+Clock/entropy/network/file observations and randomized encryption are external inputs or effects, not a
 promise of deterministic results. Keep pure computation and effectful execution
 separate in tests and evidence.
 
@@ -102,9 +108,26 @@ is ignored; do not commit real operator policies or private input data.
 - Filesystem writes use an owned temporary file and rename. A durability error
   after rename can be reported after replacement; an error is not proof that no
   external effect occurred. Read back exact targets before assuming an outcome.
-- HTTP access requires an exact allowlisted URL and an installed `/usr/bin/curl`.
-  Redirects, URL globs, inherited proxy/credentials and arbitrary shell commands
-  are not enabled. No HTTP call is needed for this walkthrough or default tests.
+- Legacy `http_get` requires its exact raw URL grant. V2 `http_request` uses
+  distinct strict origin/slash-prefix/method/header grants; neither widens the
+  other. Default tests exercise libc HTTP without curl. Optional HTTPS needs
+  the verified OpenSSL helper. Redirects, retries, globs, inherited proxy or
+  credentials and arbitrary shell commands are not enabled. Explicit serving
+  credential bindings are a separate operator-owned snapshot, not inheritance. See
+  [HTTP client](http-client.md) for v2/v3 policy, operator CA snapshots and bounds.
+- V3 defaults to `tls_security: "pq_required"`: HTTPS-only grants, TLS 1.3,
+  X25519MLKEM768 and TLS_AES_256_GCM_SHA384, with chain/identity verification
+  and no downgrade. Only explicit `"standard"` allows ordinary HTTP/TLS 1.2..1.3.
+  V1/v2 remain compatible and reject the new field. Security mode is trusted
+  operator policy, not a guest Request override. Missing/unsupported required TLS
+  fails closed. Hybrid key establishment does not provide PQ certificate
+  signatures. Application encryption is the separate named-key seal/open surface.
+- V3 `crypto_keys` grants seal/open separately, using bounded immutable SPKI/PKCS8
+  snapshots. Private-key sources cannot overlap either granted file root. Guests
+  receive neither key bytes nor key paths. Crypto deadlines and shared attempt/byte
+  bounds apply; authorized decrypt failures release no plaintext. Optional static
+  OpenSSL 4.1+ and operator-only `pqc-keygen` are described in the
+  [post-quantum/key guide](post-quantum.md). Importing the module grants nothing.
 - Host-operation errors are ordinary `result` values. Fuel, resource and safety
   traps remain separate terminal execution failures.
 - Use dedicated narrow roots rather than granting a home directory or repository

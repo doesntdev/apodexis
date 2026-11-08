@@ -28,10 +28,10 @@ static const char *const builtin_names[] = {
     "str_chars", "str_char", "str_slice", "str_find", "str_split", "str_trim",
     "str_replace", "str_lower_ascii", "str_upper_ascii", "parse_i64", "parse_f64",
     "str_i64", "str_f64", "map", "map_get", "map_put", "map_remove", "map_has",
-    "map_keys", "map_values", "array_get", "array_set", "array_slice", "array_cat", "with", "json_decode"
+    "map_keys", "map_values", "array_get", "array_set", "array_slice", "array_cat", "with", "json_decode", "json_encode", "json_decode_fields"
 };
 int apx_builtin_opcode(const char *name) {
-    static const char *const host_names[]={"fs_read","fs_write","env_get","clock_ms","random_hex","http_get"};
+    static const char *const host_names[]={"fs_read","fs_write","env_get","clock_ms","random_hex","http_get","http_request","pqc_seal","pqc_open"};
     unsigned i;
     for(i=0;i<sizeof host_names/sizeof host_names[0];i++)if(!strcmp(name,host_names[i]))return 1001+(int)i;
     for (i = 0; i < sizeof builtin_names / sizeof builtin_names[0]; ++i)
@@ -295,7 +295,7 @@ static ApxExpr *parse_atom(ApxContext *ctx, Token **tokens, unsigned depth) {
                 apx_buf_printf(&name,"%s.%s",e->text,member->text);e->text=name.data;
                 head->span.end=member->span.end;*tokens=member->next;
             }
-            if ((!strcmp(head->text, "buf") || !strcmp(head->text, "map") || !strcmp(head->text, "json_decode")) && *tokens && strcmp((*tokens)->text, ")")) {
+            if ((!strcmp(head->text, "buf") || !strcmp(head->text, "map") || !strcmp(head->text, "json_decode") || !strcmp(head->text, "json_decode_fields")) && *tokens && strcmp((*tokens)->text, ")")) {
                 ApxArg *a = apx_alloc(ctx, sizeof *a); ApxExpr *marker = apx_alloc(ctx, sizeof *marker);
                 marker->kind = APX_TYPE_EXPR; marker->span = (*tokens)->span; marker->marker = parse_type(ctx, tokens, depth + 1);
                 marker->syntax_height=parsed_type_height(marker->marker);
@@ -751,7 +751,14 @@ static ApxType *infer_pure(Checker *c, ApxExpr *e, ApxType *expected) {
         }
         e->record=d; return bad||poisoned(left)?&poison_type:left;
     }
-    if(op==55){
+    if(op==56){
+        positional(c,e,1);
+        left=infer(c,a->expr,NULL);
+        if(poisoned(left))return &poison_type;
+        apx_check_json_type(c->ctx,c->program,left,a->expr->span);
+        return str;
+    }
+    if(op==55||op==57){
         positional(c,e,2);
         if(a->expr->kind!=APX_TYPE_EXPR) mismatch(c,e->span,"json_decode requires a concrete type marker and str text");
         left=a->expr->marker;
@@ -800,8 +807,8 @@ static ApxType *infer_pure(Checker *c, ApxExpr *e, ApxType *expected) {
 static ApxType *infer_call(Checker *c, ApxExpr *e, ApxType *expected) {
     int op = apx_builtin_opcode(e->text); ApxArg *a = e->args; ApxType *left, *primitive; size_t count = 2;
     e->opcode = op;
-    if (op >= 30 && op <= 55) return infer_pure(c,e,expected);
-    if(op>=1001&&op<=1006){
+    if (op >= 30 && op <= 57) return infer_pure(c,e,expected);
+    if(op>=1001&&op<=1009){
         int bad=0;positional(c,e,op==1004?0:op==1002?2:1);
         ApxType *str=type_new(c->ctx,APX_STR,NULL,NULL),*i64=type_new(c->ctx,APX_I64,NULL,NULL);
         for(ApxArg *arg=a;arg;arg=arg->next)if(poisoned(infer(c,arg->expr,op==1005?i64:str)))bad=1;
@@ -950,7 +957,7 @@ static void infer_unvisited_arguments(Checker *c, ApxExpr *e, ApxType *expected,
         if (op <= 5 && op && expected && (expected->kind == APX_I64 || expected->kind == APX_F64)) hint = expected;
         if (op >= 12 && op <= 15) hint = type_new(c->ctx, op == 15 ? APX_STR : APX_BOOL, NULL, NULL);
         if ((op == 17 || op == 19) && a != e->args) hint = type_new(c->ctx, APX_I64, NULL, NULL);
-        if (op == 55 && a == e->args->next) hint = type_new(c->ctx, APX_STR, NULL, NULL);
+        if ((op == 55 || op == 57) && a == e->args->next) hint = type_new(c->ctx, APX_STR, NULL, NULL);
         if (a->expr->type || a->expr->kind == APX_TYPE_EXPR || (op == 18 && a != e->args)) continue;
         infer(c, a->expr, hint);
     }

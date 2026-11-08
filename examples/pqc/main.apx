@@ -1,0 +1,7 @@
+M encrypt
+I p "pqc"
+T Input struct
+  key:str
+  body:p::Body
+F main input:Input->result p::Envelope str
+  R (p::seal input.key input.body)

@@ -47,8 +47,30 @@ To compile Apodexis source, the host needs:
 On Debian/Ubuntu, the assembler/linker and glibc link-time files are supplied by
 `binutils` and `libc6-dev`. With the prerequisites present, the installed compiler
 needs no C compiler, Python, Rust, Cargo, Node.js, model, API key or package
-download. The optional HTTP GET capability uses `/usr/bin/curl`; pure programs
-do not need it, and it is not bundled.
+download. The default bundle includes the libc-only `.build/tools/apx-http`
+without curl, libcurl or OpenSSL. `make dist-http` produces the separate
+`apodexis-linux-amd64-http.tar.gz` profile with `.build/tools/apx-http-tls`;
+that TLS helper requires compatible system libssl.so.3/libcrypto.so.3
+and trusted CAs. `HTTP-PROFILE` records the explicit selection; merely building
+a TLS helper never adds it to the default bundle. The shipped typed module is
+`examples/http_client/http.apx`; see [HTTP client](docs/http-client.md) in the
+installed bundle (or [source guide](http-client.md) in this checkout).
+
+`make dist-pqc PQC_OPENSSL_PREFIX=/absolute/path/to/verified-sdk` explicitly builds
+`apodexis-linux-amd64-pqc.tar.gz`. This profile adds **both** HTTP helpers and the
+static `.build/tools/apx-pqc`, `PQC-PROFILE`, full `OPENSSL-LICENSE` (also under
+`third_party/`) and `openssl-pqc-provenance.json`. The crypto helper needs no SDK
+prefix, libcrypto DSO, provider service or config files at runtime; HTTPS still
+needs the separate compatible system TLS libraries/roots above. Default `dist`
+excludes both optional helpers even if stale copies exist locally.
+
+With the PQ profile, the operator can run
+`bin/apodexis pqc-keygen /absolute/path/to/NEW-key-directory --json`, then select
+public/private key grants in `apodexis.host_policy.v3` for compiled seal/open.
+The directory must be new; protect its unencrypted private key outside file
+grants. Importing `examples/pqc/pqc.apx` does not grant authority. See
+`docs/post-quantum.md` in the bundle (or [source guide](post-quantum.md)) for
+required-PQ HTTPS, key policy, typed examples, bounds and security limitations.
 
 A **generated application** has a smaller boundary: a compatible Linux kernel and
 runtime glibc. It does not need the bundle, original source, assembler/linker or
@@ -188,15 +210,21 @@ process access. Native workers retain seccomp and resource restrictions. Source
 tests, `verify`, ordinary MCP calls and standalone artifacts without a trusted
 broker channel remain ungranted.
 
-An operator can grant supported effects only through CLI
-`run --capabilities policy.json`. That policy is a separate operator-owned file,
+An operator can grant supported effects through CLI
+`run --capabilities policy.json` or fixed policies in the separate
+`serve --manifest /absolute/path/to/tools.json` mode. See bundled
+[tool serving](docs/tool-serving.md) (or [source guide](tool-serving.md)) for
+reviewed named tools, HTTP credential references, limits and cancellation.
+Application-key grants remain disabled in serving mode. A policy is a separate operator-owned file,
 not part of the bundle or an authority granted by generated source. The bundled
-`resources/stdlib.md` defines `apodexis.host_policy.v1`, its exact grant fields
-and operation bounds. Host observations/effects are not deterministic.
+`resources/stdlib.md` defines the retained v1/v2 grants and v3 network/key
+authority, with exact bounds. V3 defaults to required hybrid-PQ HTTPS; application
+seal/open need separate named key grants. Key generation is operator CLI only,
+never a language or MCP operation. Host observations/effects are not deterministic.
 
 Apodexis is experimental, not a certified sandbox or the sole boundary for
 hostile production code. The compiler, runtime, broker, QBE, distribution and
-operating system are trusted. No WASM/WASI, GPU, database adapter or event loop
+operating system are trusted. No WASM/WASI, GPU, database adapter or language event loop
 is provided. Follow the project's
 [security policy](https://github.com/doesntdev/apodexis/security/policy) for
 sensitive findings; do not post private data or exploit details publicly.
@@ -210,7 +238,7 @@ sensitive findings; do not post private data or exploit details publicly.
 | Native linking fails | Check `/usr/bin/ld`, glibc development files and the expected dynamic loader. |
 | Artifact creation is refused | Select an unused writable output path. |
 | JSON input is rejected | Inspect `contract`; preserve exact types and fields. |
-| A host operation returns `capability_denied` | This is the default; only an operator-owned CLI policy can grant effects. |
+| A host operation returns `capability_denied` | This is the default; only an operator CLI policy or fixed serving manifest can grant effects. |
 | MCP parsing/discovery fails | Launch the absolute binary directly, reserve stdout for JSON-RPC and refresh discovery. |
 
 See the bundled `LICENSE`, `THIRD_PARTY_NOTICES.md` and `QBE-LICENSE` for terms

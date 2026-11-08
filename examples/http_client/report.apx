@@ -1,0 +1,106 @@
+M api_report
+I h "http"
+
+T Input struct
+  url:str
+  destination:str
+
+T Item struct
+  name:str
+  count:i64
+
+T Dataset struct
+  items:[Item]
+
+T Report struct
+  records:i64
+  total:i64
+  counts:map i64
+
+F summarize data:Dataset->result Report str
+  ? (> (# data.items) 1000)
+    R (err "too_many_records")
+  L counts (map i64)
+  L total 0
+  E item data.items
+    ? (= (str_trim item.name) "")
+      R (err "empty_item_name")
+    ? (< item.count 0)
+      R (err "negative_item_count")
+    L previous 0
+    C (map_get counts item.name)
+      some value
+        S previous value
+      none
+        A true
+    S counts (map_put counts item.name (+ previous item.count))
+    S total (+ total item.count)
+  R (ok (Report records=(# data.items) total=total counts=counts))
+
+F write_report destination:str data:Dataset->result Report str
+  C (summarize data)
+    ok report
+      L document (cat (json_encode report) "\n")
+      C (fs_write destination document)
+        ok bytes
+          R (ok report)
+        err problem
+          R (err problem)
+    err problem
+      R (err problem)
+
+F main input:Input->result Report str
+  L request (h::Request method="GET" url=input.url headers=[] body=(h::text ""))
+  C (h::request request)
+    ok response
+      ? (! (= response.status 200))
+        R (err "api_status_not_200")
+      C (h::body_text response.body)
+        ok document
+          C (json_decode Dataset document)
+            ok data
+              R (write_report input.destination data)
+            err problem
+              R (err (cat "api_decode: " problem))
+        err problem
+          R (err problem)
+    err problem
+      R (err problem)
+
+X aggregate_duplicates
+  C (summarize (Dataset items=[(Item name="alpha" count=2) (Item name="beta" count=3) (Item name="alpha" count=4)]))
+    ok report
+      A (= report.records 3)
+      A (= report.total 9)
+      A (= (map_get report.counts "alpha") (some 6))
+      A (= (map_get report.counts "beta") (some 3))
+    err problem
+      A false
+
+X reject_negative
+  C (summarize (Dataset items=[(Item name="alpha" count=-1)]))
+    ok report
+      A false
+    err problem
+      A (= problem "negative_item_count")
+
+X reject_blank
+  C (summarize (Dataset items=[(Item name=" " count=1)]))
+    ok report
+      A false
+    err problem
+      A (= problem "empty_item_name")
+
+X decode_is_strict
+  C (json_decode Dataset "{\"items\":[{\"name\":\"alpha\",\"count\":1,\"unknown\":true}]}")
+    ok data
+      A false
+    err problem
+      A (! (= problem ""))
+
+X denied_without_operator_authority
+  C (main (Input url="http://127.0.0.1:1/v1/items" destination="report.json"))
+    ok report
+      A false
+    err problem
+      A (= problem "capability_denied")

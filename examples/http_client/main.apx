@@ -1,0 +1,11 @@
+M http_example
+I h "http"
+F main req:h::Request->result h::Response str
+  R (h::request req)
+X denied_by_default
+  L req (h::Request method="GET" url="http://127.0.0.1:1/" headers=[] body=(h::text ""))
+  C (main req)
+    ok response
+      A false
+    err problem
+      A (= problem "capability_denied")

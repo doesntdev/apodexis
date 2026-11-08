@@ -1,7 +1,7 @@
 # Apodexis standard library: every implemented builtin
 
-The standard library provides 55 pure operations (including special `with` and `json_decode` lowering)
-and six explicitly controlled host operations. Core primitives and essential pure
+The standard library provides 56 pure operations (including special `with` and `json_decode` lowering)
+and nine explicitly controlled host operations. Core primitives and essential pure
 libraries are listed below; use only these implemented names and signatures. All calls are prefix
 expressions on one source line. In signatures below, T is notation for the
 actual concrete type, not a user-defined generic parameter. Numeric operations
@@ -39,7 +39,7 @@ alias snapshots, normal item typing, eager item evaluation and capacity traps.
 `(buf Point 3)`. It is not a quoted string or generic bracket expression.
 Use `array_cat`, `array_get`, `array_set`, `array_slice`, and `with` for immutable
 value operations; the string/conversion/map additions are documented below.
-There is no sort builtin, JSON encoder or reflection. Use `json_decode` for typed JSON
+There is no sort builtin or reflection. Use `json_encode`/`json_decode` for typed JSON
 documents, and loops
 and builders when incremental array construction is needed. For an upper-bound number of appended items,
 choose a capacity that covers that bound; allocation does not extend capacity.
@@ -142,6 +142,22 @@ X snapshots
   A (= (str_slice "aé😀" 1 2) "é😀")
 ```
 
+## JSON encoding and HTTP module
+
+`(json_encode value)` (56) returns `str` using existing checked JSON eligibility,
+including tagged option/result map payloads. Direct option/result, enums,
+builders and ineligible nested shapes are rejected. Evaluation is once; aliases,
+arena/fuel and normal resource traps are preserved. Nested nonfinite f64 traps
+R999 instead of encoding null. For outbound documents use `h::text (json_encode
+payload)` with an explicit content-type header.
+
+`http_request` (1007) takes strict Request JSON text and returns Response JSON text
+or a payload-free error token. The ordinary sibling module at
+`examples/http_client/http.apx` provides Body/Header/Request/Response and
+text/header/body_text/request helpers. Its record names are not reserved types.
+See `docs/http-client.md` for exact fields, canonical padded base64, seven methods,
+strict v2 grants, framing/bounds, TLS and post-send effect uncertainty.
+
 ## Typed JSON documents
 
 `(json_decode T text)` takes a concrete type marker and one `str` expression,
@@ -192,6 +208,21 @@ X missing
       A (= problem "missing_field")
 ```
 
+## Typed field projection
+
+`(json_decode_fields T text) -> result T str` (pure opcode 57) has the same
+concrete JSON type-marker eligibility and once-only text evaluation as
+`json_decode`. It requires all selected struct fields and returns a fresh
+normalized struct in declaration order, ignoring extra struct fields recursively
+through arrays and map values. Map entries and tagged option/result wrappers are
+not projected away. Unknown fields must still contain valid JSON with unique
+names; escaped duplicates and NUL-suffixed keys retain exact parser semantics.
+Wrong/missing selected values, malformed/trailing JSON, numeric/UTF-8/depth
+errors remain errors; resource failures and traps propagate without resetting
+aliases or replacing the live outer trap. `json_decode`, entrypoint ABI checks
+and `json_encode` remain strict/unchanged. No host permission is required.
+See [repo brief](../docs/repo-brief.md) for a native fixed-policy API workflow.
+
 ## Explicit host operations
 
 | Name | Signature |
@@ -202,9 +233,15 @@ X missing
 | clock_ms | zero args -> result i64 str; Unix wall-clock milliseconds. |
 | random_hex | i64 bytes -> result str str; entropy encoded as hex, 0..256 bytes. |
 | http_get | str exact_url -> result str str; allowlisted HTTP(S) GET, UTF-8 2xx body only. |
+| http_request | str strict_request_json -> result str str; native HTTP status/headers/trailers/body document, operator v2/v3 CLI or serving grants only. |
+| pqc_seal | str strict_seal_json -> result str str; standard CMS Envelope JSON, CLI v3 public-key grant only (1008). |
+| pqc_open | str strict_open_json -> result str str; authenticated Body JSON, CLI v3 private-key grant only (1009). |
 
 All are denied without an operator policy. CLI `run --capabilities policy.json`
-activates `apodexis.host_policy.v1`; its fields are read_root/write_root (absolute
+activates an explicit v1, v2 or v3 host policy; a separate `serve --manifest` mode
+can bind immutable per-tool policies and private HTTP header snapshots. Serving
+callers cannot grant authority, and application-key fields/operations remain
+disabled there. See [tool serving](../docs/tool-serving.md). In direct policies, the retained fields are read_root/write_root (absolute
 directories), env (names), clock/random (bool), http_get (exact URLs), max_bytes
 (1..1048576) and max_requests (1..1024; default 64). Unspecified grants are denied.
 Requests use relative files under the supplied roots; absolute paths, `.`/`..`,
@@ -212,8 +249,35 @@ symlink traversal and nonregular/hardlinked files are rejected. Writes use an
 owned temporary file and rename; a post-rename durability failure may report an
 error after replacement, so applications must not assume every error means no
 write occurred. HTTP redirects, URL glob expansion, proxy/credential inheritance
-and arbitrary shell commands are not enabled. HTTP has a five-second adapter
-timeout and requires installed `/usr/bin/curl`; it is not a compiler dependency.
+and arbitrary shell commands are not enabled. Native HTTP uses a libc helper;
+HTTPS needs the optional verified OpenSSL helper. Neither uses curl/libcurl.
+V2 adds strict http origin/path/method/header grants, a reducible 1..5000 ms
+deadline and an operator-only tls_ca_file snapshot. V3 defaults to required
+TLS1.3/X25519MLKEM768/TLS_AES_256_GCM_SHA384; only explicit `tls_security: "standard"`
+permits ordinary HTTP/TLS. V1/v2 preserve legacy modes and reject v3 fields.
+See [HTTP client](../docs/http-client.md).
+
+V3 additionally accepts up to 16 named `crypto_keys` slots: `public_key_file`
+grants seal, `private_key_file` grants open; neither implies the other. Key files
+are operator-owned, strictly checked and snapshotted into sealed memfds, outside
+granted file roots. Guests pass slot names, never key bytes/paths or algorithms.
+Seal input is `{key,body}`; open input is `{key,envelope}`. Body is exactly
+`{encoding,data}` (`utf8` or canonical padded base64); Envelope is exactly
+`{format,data}`, using `cms-authenveloped-mlkem768-aes256gcm-v1` and base64 DER.
+Success is one JSON document inside the ordinary `result str str`.
+The ordinary module `examples/pqc/pqc.apx` supplies typed seal/open wrappers.
+
+The optional static OpenSSL 4.1+ helper performs standard CMS ML-KEM-768,
+HKDF-SHA256, AES256-WRAP and AES256-GCM. Plaintext is released only after profile
+validation and authentication; authorized malformed/tampered open requests return
+payload-free `pqc_decrypt_failed`. `max_bytes` bounds content, DER has a separate
+4096-byte allowance, and byte/frame/request/deadline limits remain independent.
+`crypto_timeout_ms` only reduces the 5000 ms default. Missing slots/directions
+return `pqc_key_denied`; missing helper returns `pqc_unavailable`. Key generation
+is the separate operator CLI `pqc-keygen`, never a builtin or MCP tool.
+Recipient SPKI pinning is not sender identity, signatures, replay protection or
+forward secrecy. See [post-quantum encryption](../docs/post-quantum.md) for the
+complete policy, exact profile, key security and error contract.
 
 Native worker seccomp remains active; only a broker channel gains read/write
 permission. Tests, verify, default MCP and standalone artifacts without a trusted

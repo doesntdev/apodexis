@@ -47,5 +47,27 @@ int main(void){
  require(!apx_modules_resolve(marker_text,decode_modules,1,&out,&diag)&&out&&!diag&&strstr(out,"\"(json_decode shared::Secret text)\" ; (json_decode shared::Secret text)"),"decoder-looking strings and comments stay literal");free(out);
  const char *marker_controls="M entry\nI shared \"shared\"\nF main->i64\n  L a:builder shared::Row (buf shared::Row 2)\n  L b:map shared::Row (map shared::Row)\n  R 0\n";
  require(!apx_modules_resolve(marker_controls,decode_modules,1,&out,&diag)&&out&&!diag&&strstr(out,"(buf __apx_m1_Row 2)")&&strstr(out,"(map __apx_m1_Row)"),"existing buf and map marker handling retained");free(out);
+ {
+ /* Type-marker consumers must participate in module qualification. */
+ ApxModuleSource decode_modules[]={{"shared","M shared\nV Row\nV decode\nV payload\nT Row struct\n  id:i64\nT Secret struct\n  hidden:i64\nF decode text:str->result Row str\n  R (json_decode_fields Row text)\nF payload->str\n  R \"{\\\"id\\\":7}\"\n"}};
+ const char *decode_entry="M entry\nI shared \"shared\"\nF main doc:str->result shared::Row str\n  R (json_decode_fields shared::Row doc)\n";
+ require(!apx_modules_resolve(decode_entry,decode_modules,1,&out,&diag)&&out&&!diag,"qualified json_decode_fields target resolves");
+ require(strstr(out,"(json_decode_fields __apx_m1_Row doc)")&&strstr(out,"(json_decode_fields __apx_m1_Row text)")&&strstr(out,"->result __apx_m1_Row str"),"entry and imported decoder type markers both renamed");free(out);
+ const char *imported_decode="M entry\nI shared \"shared\"\nF main doc:str->result shared::Row str\n  R (shared::decode doc)\n";
+ require(!apx_modules_resolve(imported_decode,decode_modules,1,&out,&diag)&&out&&!diag,"imported json_decode_fields function resolves");
+ require(strstr(out,"(__apx_m1_decode doc)")&&strstr(out,"(json_decode_fields __apx_m1_Row text)"),"imported decoder keeps callable and type roles distinct");free(out);
+ const char *nested_decode="M entry\nI shared \"shared\"\nF main doc:str->result [shared::Row] str\n  L a (json_decode_fields [shared::Row] doc)\n  L b (json_decode_fields map shared::Row doc)\n  R a\n";
+ require(!apx_modules_resolve(nested_decode,decode_modules,1,&out,&diag)&&out&&!diag,"nested json_decode_fields target resolves");
+ require(strstr(out,"(json_decode_fields [__apx_m1_Row] doc)")&&strstr(out,"(json_decode_fields map __apx_m1_Row doc)"),"array and map decoder markers recursively qualified");free(out);
+ const char *decode_value="M entry\nI shared \"shared\"\nF main->result shared::Row str\n  R (json_decode_fields shared::Row (shared::payload))\n";
+ require(!apx_modules_resolve(decode_value,decode_modules,1,&out,&diag)&&out&&!diag,"decoder text remains a value expression");
+ require(strstr(out,"(json_decode_fields __apx_m1_Row (__apx_m1_payload))")!=NULL,"only the marker uses type-reference rules");free(out);
+ rejected("M entry\nI shared \"shared\"\nF main doc:str->str\n  R (json_decode_fields shared::Secret doc)\n",decode_modules,1,"private_module_symbol");
+ rejected("M entry\nI shared \"shared\"\nF main doc:str->str\n  R (json_decode_fields shared::decode doc)\n",decode_modules,1,"invalid_module_type");
+ const char *marker_text="M entry\nI shared \"shared\"\nF main->str\n  R \"(json_decode_fields shared::Secret text)\" ; (json_decode_fields shared::Secret text)\n";
+ require(!apx_modules_resolve(marker_text,decode_modules,1,&out,&diag)&&out&&!diag&&strstr(out,"\"(json_decode_fields shared::Secret text)\" ; (json_decode_fields shared::Secret text)"),"decoder-looking strings and comments stay literal");free(out);
+ const char *marker_controls="M entry\nI shared \"shared\"\nF main->i64\n  L a:builder shared::Row (buf shared::Row 2)\n  L b:map shared::Row (map shared::Row)\n  R 0\n";
+ require(!apx_modules_resolve(marker_controls,decode_modules,1,&out,&diag)&&out&&!diag&&strstr(out,"(buf __apx_m1_Row 2)")&&strstr(out,"(map __apx_m1_Row)"),"existing buf and map marker handling retained");free(out);
+ }
  printf("native module resolver: %u checks PASS\n",checks);return 0;
 }

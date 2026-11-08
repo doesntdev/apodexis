@@ -1,0 +1,7 @@
+M repo_brief_config
+V origin
+V repository
+F origin->str
+  R "https://api.github.com"
+F repository->str
+  R "doesntdev/apodexis"

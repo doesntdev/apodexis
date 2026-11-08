@@ -1,0 +1,548 @@
+M repo_brief
+I h "http"
+I cfg "repo_brief_config"
+
+T Input struct
+  repository:str
+  page_limit:i64
+T Issue struct
+  number:i64
+  title:str
+  html_url:str
+  updated_at:str
+T PullRequest struct
+  number:i64
+  title:str
+  html_url:str
+  updated_at:str
+  draft:bool
+T Release struct
+  tag_name:str
+  html_url:str
+  prerelease:bool
+T Search struct
+  total_count:i64
+  incomplete_results:bool
+  items:[Issue]
+T Rate struct
+  bucket:str
+  provider_resource:str
+  limit:str
+  remaining:str
+  reset:str
+  retry_after:str
+T Issues struct
+  items:[Issue]
+  observed_count:i64
+  pages_fetched:i64
+  requests:i64
+  complete:bool
+  status:str
+  reason:str
+  api_url:str
+  source_url:str
+  rate:Rate
+  source_changed:bool
+  total_known:bool
+  total_count:i64
+  incomplete_results:bool
+T Pulls struct
+  items:[PullRequest]
+  observed_count:i64
+  pages_fetched:i64
+  requests:i64
+  complete:bool
+  status:str
+  reason:str
+  api_url:str
+  source_url:str
+  rate:Rate
+  source_changed:bool
+T Releases struct
+  items:[Release]
+  observed_count:i64
+  pages_fetched:i64
+  requests:i64
+  complete:bool
+  status:str
+  reason:str
+  api_url:str
+  source_url:str
+  rate:Rate
+  source_changed:bool
+T Brief struct
+  repository:str
+  repository_url:str
+  status:str
+  issues:Issues
+  pull_requests:Pulls
+  releases:Releases
+  flags:[str]
+  request_count:i64
+
+F human->str
+  R (cat "https://github.com/" (cfg::repository))
+F endpoint kind:str page:i64->str
+  L root (cat (cfg::origin) "/repos/")
+  ? (= kind "issues")
+    L encoded (str_replace (cfg::repository) "/" "%2F")
+    R (cat (cat (cat (cfg::origin) "/search/issues?q=repo%3A") encoded) (cat "%20is%3Aissue%20is%3Aopen&sort=updated&order=desc&per_page=10&page=" (str_i64 page)))
+  ? (= kind "pulls")
+    R (cat (cat root (cfg::repository)) (cat "/pulls?state=open&sort=updated&direction=desc&per_page=10&page=" (str_i64 page)))
+  R (cat (cat root (cfg::repository)) (cat "/releases?per_page=5&page=" (str_i64 page)))
+F get kind:str page:i64->result h::Response str
+  L headers [(h::header "user-agent" "Apodexis-repo-brief") (h::header "accept" "application/vnd.github+json") (h::header "x-github-api-version" "2022-11-28")]
+  R (h::request (h::Request method="GET" url=(endpoint kind page) headers=headers body=(h::text "")))
+F header response:h::Response name:str->str
+  L found ""
+  L count 0
+  E entry response.headers
+    ? (= (str_lower_ascii entry.name) name)
+      S count (+ count 1)
+      C (h::body_text entry.value)
+        ok text
+          ? (| (> count 1) (> (# text) 4096))
+            R "!invalid!"
+          S found text
+        err problem
+          R "!invalid!"
+  R found
+F bounded value:str->str
+  ? (> (# value) 128)
+    R "unavailable"
+  C (str_find value "\0")
+    some position
+      R "unavailable"
+    none
+      R value
+F rate response:h::Response bucket:str->Rate
+  R (Rate bucket=bucket provider_resource=(bounded (header response "x-ratelimit-resource")) limit=(bounded (header response "x-ratelimit-limit")) remaining=(bounded (header response "x-ratelimit-remaining")) reset=(bounded (header response "x-ratelimit-reset")) retry_after=(bounded (header response "retry-after")))
+F empty_rate bucket:str->Rate
+  R (Rate bucket=bucket provider_resource="" limit="" remaining="" reset="" retry_after="")
+; Only explicit, well-formed bounded header evidence makes a 403 throttling.
+F decimal text:str->bool
+  ? (| (= (# text) 0) (> (# text) 128))
+    R false
+  L stripped text
+  E digit ["0" "1" "2" "3" "4" "5" "6" "7" "8" "9"]
+    S stripped (str_replace stripped digit "")
+  R (= stripped "")
+F http_status response:h::Response->str
+  L status response.status
+  ? (= status 429)
+    R "rate_limited"
+  ? (= status 403)
+    L remaining (header response "x-ratelimit-remaining")
+    L retry (header response "retry-after")
+    ? (| (& (decimal remaining) (= (str_replace remaining "0" "") "")) (decimal retry))
+      R "rate_limited"
+    R "forbidden"
+  ? (= status 404)
+    R "inaccessible"
+  ? (& (>= status 300) (< status 400))
+    R "protocol_error"
+  R "http_error"
+; Canonical positive signed-i64 counters/metadata IDs; zero is the refusal sentinel.
+F positive text:str->i64
+  C (parse_i64 text)
+    err problem
+      R 0
+    ok number
+      ? (| (<= number 0) (! (= (str_i64 number) text)))
+        R 0
+      R number
+F hex_digit text:str->i64
+  C (str_find "0123456789abcdef" (str_lower_ascii text))
+    some index
+      R index
+    none
+      R -1
+; Decode form query components exactly once. Expected semantic fields are ASCII.
+; Non-printable/non-ASCII escapes cannot equal any configured query value.
+F form_value text:str->option str
+  L value ""
+  L index 0
+  L length (str_chars text)
+  W (< index length)
+    L ch (str_slice text index 1)
+    L escaped (= ch "%")
+    ? escaped
+      ? (>= (+ index 2) length)
+        R (none)
+      L high (hex_digit (str_slice text (+ index 1) 1))
+      L low (hex_digit (str_slice text (+ index 2) 1))
+      ? (| (< high 0) (< low 0))
+        R (none)
+      L code (+ (* high 16) low)
+      ? (| (< code 32) (> code 126))
+        R (none)
+      L printable " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+      S ch (str_slice printable (- code 32) 1)
+      S index (+ index 2)
+    ? (! escaped)
+      ? (= ch "+")
+        S ch " "
+    S value (cat value ch)
+    S index (+ index 1)
+  R (some value)
+; Return metadata's page, never its URL. The GET constructor remains named/fixed.
+F metadata_page url:str kind:str->i64
+  L parts (str_split url "?")
+  ? (! (= (# parts) 2))
+    R 0
+  L route (@ parts 0)
+  L named (cat (cat (cat (cfg::origin) "/repos/") (cfg::repository)) (cat "/" kind))
+  L route_ok (= route named)
+  ? (= kind "issues")
+    S route_ok (= route (cat (cfg::origin) "/search/issues"))
+  ? (! (= kind "issues"))
+    L alias (cat (cfg::origin) "/repositories/")
+    ? (>= (str_chars route) (str_chars alias))
+      ? (= (str_slice route 0 (str_chars alias)) alias)
+        L tail (str_split (str_slice route (str_chars alias) (- (str_chars route) (str_chars alias))) "/")
+        ? (= (# tail) 2)
+          S route_ok (& (> (positive (@ tail 0)) 0) (= (@ tail 1) kind))
+  ? (! route_ok)
+    R 0
+  L expected (map str)
+  ? (= kind "issues")
+    S expected (map_put expected "q" (cat (cat "repo:" (cfg::repository)) " is:issue is:open"))
+    S expected (map_put expected "sort" "updated")
+    S expected (map_put expected "order" "desc")
+    S expected (map_put expected "per_page" "10")
+  ? (! (= kind "issues"))
+    ? (= kind "pulls")
+      S expected (map_put expected "state" "open")
+      S expected (map_put expected "sort" "updated")
+      S expected (map_put expected "direction" "desc")
+      S expected (map_put expected "per_page" "10")
+    ? (= kind "releases")
+      S expected (map_put expected "per_page" "5")
+  L seen (map bool)
+  L page 0
+  L count 0
+  E field (str_split (@ parts 1) "&")
+    L pair (str_split field "=")
+    ? (! (= (# pair) 2))
+      R 0
+    C (form_value (@ pair 0))
+      none
+        R 0
+      some key
+        ? (map_has seen key)
+          R 0
+        S seen (map_put seen key true)
+        C (form_value (@ pair 1))
+          none
+            R 0
+          some value
+            ? (= key "page")
+              S page (positive value)
+            ? (! (= key "page"))
+              C (map_get expected key)
+                none
+                  R 0
+                some original
+                  ? (! (= value original))
+                    R 0
+              S count (+ count 1)
+  ? (! (= count (# expected)))
+    R 0
+  R page
+; Link is metadata only. Even a valid next link is never used as a request URL.
+; Accept the ordinary GitHub rel grammar, refuse ambiguous or foreign metadata.
+F continuation response:h::Response kind:str page:i64->str
+  L link (header response "link")
+  ? (= link "")
+    R "absent"
+  ? (| (= link "!invalid!") (> (# link) 4096))
+    R "invalid"
+  L next false
+  L last 0
+  L seen (map bool)
+  E part (str_split link ",")
+    L pair (str_split (str_trim part) ";")
+    ? (! (= (# pair) 2))
+      R "invalid"
+    L target (str_trim (@ pair 0))
+    L relation (str_trim (@ pair 1))
+    ? (| (< (str_chars target) 3) (map_has seen relation))
+      R "invalid"
+    S seen (map_put seen relation true)
+    ? (| (! (= (str_slice target 0 1) "<")) (! (= (str_slice target (- (str_chars target) 1) 1) ">")))
+      R "invalid"
+    L url (str_slice target 1 (- (str_chars target) 2))
+    L number (metadata_page url kind)
+    ? (= number 0)
+      R "invalid"
+    L known false
+    ? (= relation "rel=\"next\"")
+      S known true
+      ? (! (= number (+ page 1)))
+        R "invalid"
+      S next true
+    ? (= relation "rel=\"prev\"")
+      S known true
+      ? (| (<= page 1) (! (= number (- page 1))))
+        R "invalid"
+    ? (= relation "rel=\"first\"")
+      S known true
+      ? (! (= number 1))
+        R "invalid"
+    ? (= relation "rel=\"last\"")
+      S known true
+      ? (< number page)
+        R "invalid"
+      S last number
+    ? (! known)
+      R "invalid"
+  ? next
+    ? (& (> last 0) (< last (+ page 1)))
+      R "invalid"
+    R "next"
+  ? (> last page)
+    R "invalid"
+  ? (= last page)
+    R "terminal"
+  R "absent"
+F valid_text text:str maximum:i64->bool
+  ? (| (= (# text) 0) (> (# text) maximum))
+    R false
+  C (str_find text "\0")
+    some position
+      R false
+    none
+      R true
+F valid_issue row:Issue->bool
+  ? (| (<= row.number 0) (! (valid_text row.title 1024)))
+    R false
+  R (& (valid_text row.updated_at 64) (= row.html_url (cat (cat (human) "/issues/") (str_i64 row.number))))
+F valid_pull row:PullRequest->bool
+  ? (| (<= row.number 0) (! (valid_text row.title 1024)))
+    R false
+  R (& (valid_text row.updated_at 64) (= row.html_url (cat (cat (human) "/pull/") (str_i64 row.number))))
+F valid_release row:Release->bool
+  L prefix (cat (human) "/releases/tag/")
+  ? (| (! (valid_text row.tag_name 256)) (! (valid_text row.html_url 1024)))
+    R false
+  ? (<= (str_chars row.html_url) (# prefix))
+    R false
+  ? (! (= (str_slice row.html_url 0 (# prefix)) prefix))
+    R false
+  L suffix (str_slice row.html_url (# prefix) (- (str_chars row.html_url) (# prefix)))
+  E ch ["?" "#" " " "\\" "\u{0}" "\u{1}" "\u{2}" "\u{3}" "\u{4}" "\u{5}" "\u{6}" "\u{7}" "\u{8}" "\u{9}" "\u{a}" "\u{b}" "\u{c}" "\u{d}" "\u{e}" "\u{f}" "\u{10}" "\u{11}" "\u{12}" "\u{13}" "\u{14}" "\u{15}" "\u{16}" "\u{17}" "\u{18}" "\u{19}" "\u{1a}" "\u{1b}" "\u{1c}" "\u{1d}" "\u{1e}" "\u{1f}" "\u{7f}"]
+    C (str_find suffix ch)
+      some position
+        R false
+      none
+        A true
+  L lowered (str_lower_ascii suffix)
+  E forbidden [".." "%2e" "%25" "%5c" "%00" "%01" "%02" "%03" "%04" "%05" "%06" "%07" "%08" "%09" "%0a" "%0b" "%0c" "%0d" "%0e" "%0f" "%10" "%11" "%12" "%13" "%14" "%15" "%16" "%17" "%18" "%19" "%1a" "%1b" "%1c" "%1d" "%1e" "%1f" "%7f"]
+    C (str_find lowered forbidden)
+      some position
+        R false
+      none
+        A true
+  R true
+F fetch_issues budget:i64->Issues
+  L section (Issues items=[] observed_count=0 pages_fetched=0 requests=0 complete=false status="transport" reason="no_response" api_url=(endpoint "issues" 1) source_url=(cat (human) "/issues") rate=(empty_rate "search") source_changed=false total_known=false total_count=0 incomplete_results=false)
+  L seen (map Issue)
+  L page 1
+  W (<= page budget)
+    S section (with section requests=(+ section.requests 1))
+    C (get "issues" page)
+      err problem
+        R (with section status="transport" reason=(bounded problem))
+      ok response
+        S section (with section rate=(rate response "search"))
+        ? (! (= response.status 200))
+          R (with section status=(http_status response) reason=(cat "http_" (str_i64 response.status)))
+        C (h::body_text response.body)
+          err problem
+            R (with section status="protocol_error" reason="non_utf8_body")
+          ok document
+            C (json_decode_fields Search document)
+              err problem
+                R (with section status="invalid_data" reason=problem)
+              ok data
+                L rows data.items
+                ? (> (# rows) 10)
+                  R (with section status="invalid_data" reason="oversized_page")
+                ? (| (< data.total_count 0) (< data.total_count (# rows)))
+                  R (with section status="invalid_data" reason="invalid_search_total")
+                ? (& section.total_known (! (= section.total_count data.total_count)))
+                  S section (with section source_changed=true)
+                E row rows
+                  ? (! (valid_issue row))
+                    R (with section status="invalid_data" reason="invalid_item")
+                S section (with section total_known=true total_count=data.total_count incomplete_results=(| section.incomplete_results data.incomplete_results))
+                E row rows
+                  L key (str_i64 row.number)
+                  ? (map_has seen key)
+                    S section (with section source_changed=true)
+                  ? (! (map_has seen key))
+                    S section (with section items=(array_cat section.items [row]))
+                  S seen (map_put seen key row)
+                S section (with section observed_count=(# section.items) pages_fetched=(+ section.pages_fetched 1))
+                ? (< section.total_count section.observed_count)
+                  S section (with section source_changed=true)
+                L more (continuation response "issues" page)
+                ? (= more "invalid")
+                  R (with section status="pagination_invalid" reason="untrusted_link_metadata")
+                ? (! (= more "next"))
+                  ? (| (= more "terminal") (< (# rows) 10))
+                    ? section.source_changed
+                      R (with section status="source_changed" reason="duplicate_rows_or_changed_total")
+                    ? section.incomplete_results
+                      R (with section status="incomplete_results" reason="provider_incomplete_results")
+                    ? (! (= section.total_count section.observed_count))
+                      R (with section status="pagination_ambiguous" reason="search_total_not_observed")
+                    R (with section complete=true status="ok" reason="")
+                  R (with section status="pagination_ambiguous" reason="full_page_without_continuation")
+                ? (= page budget)
+                  R (with section status="truncated" reason="page_limit")
+    S page (+ page 1)
+  R section
+F fetch_pulls budget:i64->Pulls
+  L section (Pulls items=[] observed_count=0 pages_fetched=0 requests=0 complete=false status="transport" reason="no_response" api_url=(endpoint "pulls" 1) source_url=(cat (human) "/pulls") rate=(empty_rate "core") source_changed=false)
+  L seen (map PullRequest)
+  L page 1
+  W (<= page budget)
+    S section (with section requests=(+ section.requests 1))
+    C (get "pulls" page)
+      err problem
+        R (with section status="transport" reason=(bounded problem))
+      ok response
+        S section (with section rate=(rate response "core"))
+        ? (! (= response.status 200))
+          R (with section status=(http_status response) reason=(cat "http_" (str_i64 response.status)))
+        C (h::body_text response.body)
+          err problem
+            R (with section status="protocol_error" reason="non_utf8_body")
+          ok document
+            C (json_decode_fields [PullRequest] document)
+              err problem
+                R (with section status="invalid_data" reason=problem)
+              ok data
+                L rows data
+                ? (> (# rows) 10)
+                  R (with section status="invalid_data" reason="oversized_page")
+                E row rows
+                  ? (! (valid_pull row))
+                    R (with section status="invalid_data" reason="invalid_item")
+                E row rows
+                  L key (str_i64 row.number)
+                  ? (map_has seen key)
+                    S section (with section source_changed=true)
+                  ? (! (map_has seen key))
+                    S section (with section items=(array_cat section.items [row]))
+                  S seen (map_put seen key row)
+                S section (with section observed_count=(# section.items) pages_fetched=(+ section.pages_fetched 1))
+                L more (continuation response "pulls" page)
+                ? (= more "invalid")
+                  R (with section status="pagination_invalid" reason="untrusted_link_metadata")
+                ? (! (= more "next"))
+                  ? (| (= more "terminal") (< (# rows) 10))
+                    ? section.source_changed
+                      R (with section status="source_changed" reason="duplicate_rows_or_changed_total")
+                    R (with section complete=true status="ok" reason="")
+                  R (with section status="pagination_ambiguous" reason="full_page_without_continuation")
+                ? (= page budget)
+                  R (with section status="truncated" reason="page_limit")
+    S page (+ page 1)
+  R section
+F fetch_releases budget:i64->Releases
+  L section (Releases items=[] observed_count=0 pages_fetched=0 requests=0 complete=false status="transport" reason="no_response" api_url=(endpoint "releases" 1) source_url=(cat (human) "/releases") rate=(empty_rate "core") source_changed=false)
+  L seen (map Release)
+  L page 1
+  W (<= page budget)
+    S section (with section requests=(+ section.requests 1))
+    C (get "releases" page)
+      err problem
+        R (with section status="transport" reason=(bounded problem))
+      ok response
+        S section (with section rate=(rate response "core"))
+        ? (! (= response.status 200))
+          R (with section status=(http_status response) reason=(cat "http_" (str_i64 response.status)))
+        C (h::body_text response.body)
+          err problem
+            R (with section status="protocol_error" reason="non_utf8_body")
+          ok document
+            C (json_decode_fields [Release] document)
+              err problem
+                R (with section status="invalid_data" reason=problem)
+              ok data
+                L rows data
+                ? (> (# rows) 5)
+                  R (with section status="invalid_data" reason="oversized_page")
+                E row rows
+                  ? (! (valid_release row))
+                    R (with section status="invalid_data" reason="invalid_item")
+                E row rows
+                  L key row.tag_name
+                  ? (map_has seen key)
+                    S section (with section source_changed=true)
+                  ? (! (map_has seen key))
+                    S section (with section items=(array_cat section.items [row]))
+                  S seen (map_put seen key row)
+                S section (with section observed_count=(# section.items) pages_fetched=(+ section.pages_fetched 1))
+                L more (continuation response "releases" page)
+                ? (= more "invalid")
+                  R (with section status="pagination_invalid" reason="untrusted_link_metadata")
+                ? (! (= more "next"))
+                  ? (| (= more "terminal") (< (# rows) 5))
+                    ? section.source_changed
+                      R (with section status="source_changed" reason="duplicate_rows_or_changed_total")
+                    R (with section complete=true status="ok" reason="")
+                  R (with section status="pagination_ambiguous" reason="full_page_without_continuation")
+                ? (= page budget)
+                  R (with section status="truncated" reason="page_limit")
+    S page (+ page 1)
+  R section
+F main input:Input->result Brief str
+  ? (! (= input.repository (cfg::repository)))
+    R (err "repository_not_approved")
+  ? (| (< input.page_limit 1) (> input.page_limit 3))
+    R (err "invalid_page_limit")
+  L issues (fetch_issues input.page_limit)
+  L pulls (fetch_pulls input.page_limit)
+  L releases (fetch_releases input.page_limit)
+  L flags:builder str (buf str 8)
+  ? (! issues.complete)
+    S flags (push flags "issues_incomplete")
+  ? (! pulls.complete)
+    S flags (push flags "pull_requests_incomplete")
+  ? (! releases.complete)
+    S flags (push flags "releases_incomplete")
+  ? (| issues.source_changed (| pulls.source_changed releases.source_changed))
+    S flags (push flags "source_changed")
+  ? issues.incomplete_results
+    S flags (push flags "provider_incomplete_results")
+  L draft false
+  E row pulls.items
+    S draft (| draft row.draft)
+  ? draft
+    S flags (push flags "draft_pull_requests")
+  L prerelease false
+  E row releases.items
+    S prerelease (| prerelease row.prerelease)
+  ? prerelease
+    S flags (push flags "prereleases")
+  L status "partial"
+  ? (& issues.complete (& pulls.complete releases.complete))
+    S status "complete"
+  ? (& (= issues.pages_fetched 0) (& (= pulls.pages_fetched 0) (= releases.pages_fetched 0)))
+    S status "failed"
+  R (ok (Brief repository=(cfg::repository) repository_url=(human) status=status issues=issues pull_requests=pulls releases=releases flags=(finish flags) request_count=(+ issues.requests (+ pulls.requests releases.requests))))
+X refused_repository
+  A (= (main (Input repository="other/repo" page_limit=1)) (err "repository_not_approved"))
+X refused_limit
+  A (= (main (Input repository=(cfg::repository) page_limit=0)) (err "invalid_page_limit"))
+X default_denied
+  C (main (Input repository=(cfg::repository) page_limit=1))
+    err problem
+      A false
+    ok brief
+      A (= brief.status "failed")
+      A (= brief.issues.reason "capability_denied")
+      A (= brief.request_count 3)

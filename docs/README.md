@@ -12,6 +12,7 @@ For authoring, read the [language specification entry point](specification.md).
 | [MCP client setup](mcp-client-setup.md) | Local stdio configuration, discovery, timeouts and troubleshooting. |
 | [Compiled tools](compiled-artifacts.md) | Session-scoped compile/invoke/release, sealed storage, strict responses and operator limits. |
 | [Configuration validator](config-validator.md) | Typed document validation and repeated MCP invocation. |
+| [HTTP client](http-client.md) | Typed native HTTP/HTTPS, strict v2 grants, optional TLS and effect uncertainty. |
 | [Host capabilities](capabilities.md) | Operator grants and a two-module file-report walkthrough. |
 | [Binary distribution](binary-distribution.md) | Relocatable installed toolchain requirements and use. |
 | [Local benchmarks](benchmarks.md) | Separate compiled-MCP round trips and historical cross-language/runtime measurements, with raw samples and limitations. |

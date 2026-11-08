@@ -10,7 +10,8 @@ input under explicit limits. Humans can use the same compiler from the command l
 **Start here:** [Project website](https://doesntdev.github.io/apodexis/) ·
 [Language specification](docs/specification.md) ·
 [Initial setup](#initial-setup) · [Examples](#examples) ·
-[Agent integration](#agent-integration-with-mcp) · [Local benchmarks](docs/benchmarks.md) ·
+[Agent integration](#agent-integration-with-mcp) · [Serve reviewed tools](docs/tool-serving.md) · [Local benchmarks](docs/benchmarks.md) ·
+[Repository briefing example](docs/repo-brief.md) ·
 [Contributing](CONTRIBUTING.md) · [MIT license](LICENSE)
 
 ## Status
@@ -57,11 +58,12 @@ than with established languages without a suitable comparison.
 | Modules | Explicit imports/exports, sibling-file CLI resolution and inline MCP bundles. |
 | Testing | `X` source tests; combined format/check/test verification; native conformance, regression and sandbox tests. |
 | Agent tooling | Local stdio MCP discovery, language resources, structured checking, guarded canonical repairs, execution, contracts and pseudocode. |
-| Compiled tools | Compile once to a session-scoped sealed handle, invoke fresh bounded JSON inputs without rebuilding, then release. No result memoization. |
-| Host capabilities | Policy-controlled file reads/writes, named environment reads, wall clock, entropy and exact-URL HTTP GET through a broker. Denied by default. |
+| Compiled tools | Default authoring MCP: session-scoped sealed handles. Separate `apodexis serve --manifest`: named reviewed tools, generated typed schemas, fixed operator grants/limits, fresh calls and cancellation. No result memoization. |
+| Host capabilities | Policy-controlled files, environment, clock, entropy and native HTTP(S), including required hybrid-PQ HTTPS. Denied by default. |
+| Application encryption | Optional ML-KEM-768/CMS authenticated encryption through named operator key grants; typed seal/open and operator-only key generation. |
 
 Important limits remain. There is no browser/WASM target, GPU backend, HTTP
-listener, database adapter, event loop, package registry, LSP, general function
+listener, database adapter, language-level event loop, package registry, LSP, general function
 value or arbitrary host callback. General user-enum construction and
 direct option/result and enum JSON inputs are not implemented (tagged option/result
 map payloads are supported). The compiler's C API is not a
@@ -94,8 +96,13 @@ No Python, Rust, Cargo, Node.js, LLVM, model download or package-manager install
 needed for the native compiler, MCP server or default native test suite. QBE is
 vendored with its [license](third_party/qbe/LICENSE) and
 [pinned provenance](third_party/qbe-provenance.json); the source build does not
-fetch compiler dependencies. The optional HTTP GET capability uses the fixed
-`/usr/bin/curl` broker adapter; it is not a default build or test dependency.
+fetch compiler dependencies. Native HTTP uses a first-party libc-only helper;
+verified HTTPS is an explicit optional OpenSSL build (`make http-tls`). Neither
+uses curl or libcurl. V3 policies default to required hybrid-PQ HTTPS.
+Application encryption separately uses an optional static OpenSSL 4.1+ helper
+(`make pqc PQC_OPENSSL_PREFIX=/absolute/path/to/verified-sdk`). Default builds and
+pure workers remain libc-only. See the [HTTP client guide](docs/http-client.md)
+and [post-quantum guide](docs/post-quantum.md) for keys, profiles and trust limits.
 
 ### Build from a source checkout
 
@@ -202,6 +209,7 @@ See the [types and JSON ABI reference](resources/types.md) for exact rules.
 | [Compact authoring](examples/compact_authoring.apx) | Postfix reads, local inference and immutable builder snapshots. |
 | [Configuration validator](examples/config_validator.apx) and [usage/maintenance](docs/config-validator.md) | Typed JSON document decoding, strict nested configuration checks, accumulated domain errors and native-MCP maintenance. |
 | [File report](examples/file_report/main.apx) and [report module](examples/file_report/report.apx) | Imports/exports, maps, strict parsing and explicitly granted file operations. |
+| [Application encryption](examples/pqc/main.apx) and [typed module](examples/pqc/pqc.apx) | CMS ML-KEM-768 seal/open with separate operator public/private-key grants; [setup and limits](docs/post-quantum.md). |
 | [HTTP response](examples/http_hello.apx) and [static response data](examples/web_static.apx) | Request/response values and asset selection as data transformations, **not running HTTP servers**. |
 
 For a less trivial pure tool:
@@ -236,6 +244,7 @@ path while keeping its distribution intact.
 | `emit-qbe SOURCE -o NEW.ssa` | Write checked QBE IL to a new artifact path. |
 | `build SOURCE -o NEW_EXECUTABLE` | Build a native ELF executable at a new path. |
 | `capabilities` | Report the current native backend, target and tooling surface. |
+| `pqc-keygen ABSOLUTE_NEW_DIRECTORY --json` | Operator-only ML-KEM-768 key generation with the optional crypto helper; no language/MCP key generation. |
 | `mcp` | Serve the local stdio MCP interface. |
 
 `build` and `emit-qbe -o` refuse to overwrite an existing artifact. For example,
@@ -347,6 +356,22 @@ of ELF and owned metadata. Compile does not execute source tests or grant host
 authority. See [compiled tools](docs/compiled-artifacts.md) for responses,
 operator-only limits and lifetime. These are MCP tools, not new CLI commands.
 
+### Serve reviewed tools with fixed authority
+
+Use `bin/apodexis serve --manifest /absolute/path/to/tools.json` for a separate
+operator-configured tool server. It compiles the selected programs at startup,
+exposes their checked input/output schemas, and applies per-tool policies and
+budgets. Callers supply only `input`; they cannot upload source or grant effects.
+HTTP credentials can stay in origin/path/method-bound broker snapshots rather
+than in authored code or model input. Application-key operations remain disabled
+in this mode.
+
+The [serving guide](docs/tool-serving.md) includes strict manifests, cancellation
+and failure behavior, and an [API-to-report program](examples/http_client/report.apx).
+An optional [real MCP client demo](examples/http_client/demo_report.py) exercises
+an authenticated owned HTTP/HTTPS fixture, typed decoding and exact file readback.
+It does not require or claim a third-party API account/integration.
+
 ### Measured compiled-tool reuse
 
 A fixed configuration-validator input measured these native MCP round trips:
@@ -383,8 +408,8 @@ write host files. MCP source/input is inline and cannot self-grant host access.
   memory/recursion/CPU/input/output bounds. Workers cannot directly open files,
   use sockets or create processes.
 - **Effects:** an operator-owned CLI `run --capabilities policy.json` can grant
-  narrow brokered file/environment/time/entropy/HTTP GET operations. These host
-  observations are not deterministic. No policy means no grants; source tests,
+  narrow brokered file/environment/time/entropy, HTTP client and named-key crypto
+  operations. These host observations/effects and encryption randomness are not deterministic. No policy means no grants; source tests,
   verification, normal MCP calls and standalone programs without a trusted broker
   channel remain ungranted.
 - **Trust:** the native compiler, runtime, broker, QBE and operating system are
@@ -407,7 +432,10 @@ make dist
 The output is `.build/apodexis-linux-amd64.tar.gz`. It contains the native compiler
 and MCP executables, QBE, prebuilt support objects, reference data, examples,
 fixtures and license notices. Follow the [binary distribution guide](docs/binary-distribution.md)
-for extraction and use.
+for extraction and use. `make dist-http` explicitly adds the system TLS helper;
+`make dist-pqc PQC_OPENSSL_PREFIX=/absolute/path/to/verified-sdk` adds both HTTP
+helpers and the static crypto helper with its license/provenance. Default `dist`
+excludes optional helpers even when they were previously built.
 
 To compile Apodexis source with that bundle, install the platform C library,
 glibc linker-development files (typically `libc6-dev` on Debian/Ubuntu) and standard
@@ -445,7 +473,8 @@ CI on GitHub; report the commands actually executed and their results.
   [builtins/host operations](resources/stdlib.md).
 - [Native backend, compiler C API and boundaries](docs/qbe-native-backend.md).
 - [MCP client setup](docs/mcp-client-setup.md) and [compiled-tool lifecycle](docs/compiled-artifacts.md).
-- [Host capability walkthrough](docs/capabilities.md).
+- [Host capability walkthrough](docs/capabilities.md), [HTTP client](docs/http-client.md)
+  and [post-quantum encryption/keys](docs/post-quantum.md).
 - [Documentation index](docs/README.md).
 - [Public changelog](CHANGELOG.md), [contribution guide](CONTRIBUTING.md) and
   [security policy](SECURITY.md).
@@ -457,7 +486,7 @@ resources/      Implemented language references and protocol catalog/schemas
 examples/       Runnable Apodexis programs, including a multi-file report tool
 fixtures/       Example and conformance inputs/expected outcomes
 tests/          Native C verification suite
-third_party/    Vendored QBE source, license and provenance
+third_party/    Vendored QBE; optional OpenSSL license and provenance
 docs/           Current specification, integration, capability and installation guides
 ```
 

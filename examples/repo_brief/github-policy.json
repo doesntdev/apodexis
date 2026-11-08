@@ -1,0 +1,32 @@
+{
+  "schema": "apodexis.host_policy.v2",
+  "http": [
+    {
+      "origin": "https://api.github.com",
+      "path_prefix": "/repos/doesntdev/apodexis/",
+      "methods": [
+        "GET"
+      ],
+      "headers": [
+        "user-agent",
+        "accept",
+        "x-github-api-version"
+      ]
+    },
+    {
+      "origin": "https://api.github.com",
+      "path_prefix": "/search/",
+      "methods": [
+        "GET"
+      ],
+      "headers": [
+        "user-agent",
+        "accept",
+        "x-github-api-version"
+      ]
+    }
+  ],
+  "max_bytes": 1048576,
+  "max_requests": 9,
+  "http_timeout_ms": 2000
+}

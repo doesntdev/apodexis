@@ -96,6 +96,7 @@ ApxValue *apx_validate_static(const ApxSchema *schema, ApxValue *input);
 /* Typed language decode. Contains A101/A102/A103 and A104/duplicate_field abi_input failures;
  * resource/runtime failures propagate. Does not reset caller-owned values. */
 ApxValue *apx_json_decode(const ApxSchema *schema, ApxValue *text);
+ApxValue *apx_json_decode_fields(const ApxSchema *schema, ApxValue *text);
 /* Safe JSON access used by the standalone compiler/MCP transport. Returned
  * JSON values live until apx_json_reset; encoded strings are caller-owned. */
 ApxValue *apx_json_parse(const char *text, size_t length);
@@ -110,6 +111,9 @@ size_t apx_json_length(ApxValue *value);
 int64_t apx_json_integer(ApxValue *value);
 int apx_json_unsigned(ApxValue *value, uint64_t *out);
 const char *apx_json_key(ApxValue *value, size_t index);
+/* Exact key bytes, including embedded NUL; zero for empty/wrong kind/bounds.
+ * Check apx_json_key first to distinguish an empty name from an invalid index. */
+size_t apx_json_key_length(ApxValue *value, size_t index);
 void apx_json_reset(void);
 /* QBE-generated entrypoints and metadata; no AST interpreter is linked. */
 extern ApxValue *apx_entry(ApxValue *input);

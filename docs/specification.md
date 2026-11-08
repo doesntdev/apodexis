@@ -39,8 +39,9 @@ library names or operation availability.
   identifies canonical source. Neither is a proof of correctness or a complete
   record of compiler, input, limits and host observations.
 - Supported host operations return typed results through a trusted broker.
-  Only an operator-owned CLI `run --capabilities` policy grants effects.
-  Source tests, verification and ordinary MCP calls remain ungranted. Host
+  An operator-owned CLI `run --capabilities` policy or a fixed per-tool serving
+  manifest grants effects. Source tests, verification and default authoring MCP
+  calls remain ungranted. Host
   observations and effects are not deterministic.
 
 ## Validation and execution
@@ -65,7 +66,7 @@ host-file edits. Apply current repair objects unchanged with the exact
 ## Implemented boundaries
 
 The native target is Linux x86-64/glibc through C99 and QBE 1.3. There is no
-WASM/WASI or GPU backend, HTTP listener, database adapter, event loop, general
+WASM/WASI or GPU backend, HTTP listener, database adapter, language event loop, general
 function value, arbitrary host callback or package registry. Request/response
 examples construct data; they do not host websites.
 
@@ -80,3 +81,46 @@ reference disagree, report a minimal reproduction and the exact diagnostic via
 the [contribution guide](../CONTRIBUTING.md); a discovered defect does not silently
 redefine the contract. For trust and disclosure boundaries, read
 [SECURITY.md](../SECURITY.md).
+
+## Typed struct-field projection
+
+`(json_decode_fields T text) -> result T str` is additive pure intrinsic 57.
+Concrete JSON eligibility, once-only operand evaluation, parser errors,
+numeric/UTF-8/duplicate/depth semantics and resource/trap behavior are identical
+to `json_decode`. Only struct unknown-field selection differs: every declared
+field remains required, fields normalize in declaration order, and extra struct
+fields are ignored recursively, including within arrays/maps. All map values
+and tagged map wrappers remain validated. Entrypoint ABI and `json_decode` stay
+strict; parser/encoder and language version identity are not relaxed. See the
+[repo brief application](repo-brief.md) for an operator-fixed native use case.
+
+## Native HTTP client and JSON encoding
+
+The current append-only builtin surface includes pure `json_encode` (56) and
+brokered `http_request` (1007). The [HTTP client guide](http-client.md) defines
+the ordinary typed module, strict v2 operator policy and bounded HTTP1.x wire.
+CLI `run --capabilities` and operator-bound `serve --manifest` tools may enable
+effects. Tests, verify and the default authoring MCP remain denied.
+Default compiler/tests/HTTP use libc; verified HTTPS is an explicit optional
+OpenSSL helper/profile. There is no curl/libcurl runtime dependency.
+
+## Operator-configured tool serving
+
+`apodexis serve --manifest` exposes only operator-selected named compiled tools,
+with checked schemas, immutable startup policies, broker-held HTTP credentials,
+fresh per-call budgets and bounded cancellation/deadline supervision. It does not
+change the default authoring MCP or add a language event loop. See the
+[serving contract and API-to-report example](tool-serving.md).
+
+## Post-quantum transport and application encryption
+
+V3 operator policies default to required TLS1.3/X25519MLKEM768/AES256 HTTPS,
+without downgrade; legacy policy modes remain compatible. Appended host builtins
+`pqc_seal` (1008) and `pqc_open` (1009) use named public/private-key grants and an
+optional static OpenSSL 4.1+ helper for the narrow standard CMS ML-KEM-768 profile.
+The ordinary typed module and operator-only `pqc-keygen` do not confer ambient
+authority. Default authoring MCP remains 13 tools with host calls denied;
+application-key operations are also denied in the separate serving mode. Pure semantics and worker
+restrictions are unchanged. See [post-quantum encryption](post-quantum.md) for
+exact profiles, provisioning, interoperability and security boundaries. Neither
+surface claims PQ certificate signatures, sender authentication or FIPS validation.

@@ -40,6 +40,52 @@
           "runtime": {
             "const": "C"
           },
+          "post_quantum": {
+            "type": "object",
+            "properties": {
+              "activation": {
+                "const": "cli-run-capabilities"
+              },
+              "policy_schema": {
+                "const": "apodexis.host_policy.v3"
+              },
+              "tls_group": {
+                "const": "X25519MLKEM768"
+              },
+              "tls_cipher": {
+                "const": "TLS_AES_256_GCM_SHA384"
+              },
+              "application_profile": {
+                "const": "cms-authenveloped-mlkem768-aes256gcm-v1"
+              },
+              "keygen": {
+                "const": "operator-cli"
+              },
+              "application_helper_available": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "activation",
+              "policy_schema",
+              "tls_group",
+              "tls_cipher",
+              "application_profile",
+              "application_helper_available",
+              "keygen"
+            ],
+            "additionalProperties": false
+          },
+          "http_client": {
+            "type": "object",
+            "properties": {
+              "activation": {"const": "cli-run-capabilities"},
+              "http_helper_available": {"type": "boolean"},
+              "tls_helper_available": {"type": "boolean"}
+            },
+            "required": ["activation", "http_helper_available", "tls_helper_available"],
+            "additionalProperties": false
+          },
           "requires_rust": {
             "const": false
           },
@@ -118,7 +164,9 @@
           "platform_tools",
           "sandbox",
           "mcp_tools",
-          "compiled_artifacts"
+          "compiled_artifacts",
+          "http_client",
+          "post_quantum"
         ],
         "additionalProperties": false
       },
@@ -144,6 +192,7 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "output_schema": {
+        "type": "object",
         "oneOf": [
           {
             "$ref": "#/$defs/FormatResponse"
@@ -410,6 +459,7 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "output_schema": {
+        "type": "object",
         "oneOf": [
           {
             "$ref": "#/$defs/RepairResponse"
@@ -1024,6 +1074,7 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "output_schema": {
+        "type": "object",
         "oneOf": [
           {
             "$ref": "#/$defs/DeveloperContextResponse"
@@ -1806,6 +1857,7 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "output_schema": {
+        "type": "object",
         "oneOf": [
           {
             "$ref": "#/$defs/TestResult"
@@ -2092,6 +2144,7 @@
         }
       },
       "output_schema": {
+        "type": "object",
         "oneOf": [
           {
             "$ref": "#/$defs/ExecutionRecord"
@@ -2618,6 +2671,7 @@
         }
       },
       "output_schema": {
+        "type": "object",
         "oneOf": [
           {
             "$ref": "#/$defs/ApplyRepairsResponse"
@@ -2895,6 +2949,7 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "output_schema": {
+        "type": "object",
         "oneOf": [
           {
             "$ref": "#/$defs/VerifyResponse"
@@ -3731,6 +3786,7 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "output_schema": {
+        "type": "object",
         "oneOf": [
           {
             "$ref": "#/$defs/PseudocodeResponse"
@@ -4099,6 +4155,7 @@
       },
       "output_schema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
         "oneOf": [
           {
             "type": "object",
@@ -4721,6 +4778,7 @@
         }
       },
       "output_schema": {
+        "type": "object",
         "oneOf": [
           {
             "$ref": "#/$defs/ExecutionRecord"
@@ -5536,6 +5594,36 @@
       "category": "pure-library",
       "summary": "(json_decode T text) -> result T str; concrete JSON input type marker and str evaluated once. Document validation failures, including duplicate fields, return diagnostic kind; resource failures propagate.",
       "opcode": 55
+    },
+    {
+      "name": "json_encode",
+      "category": "pure-library",
+      "summary": "(json_encode value) -> str; existing concrete JSON-eligible types, evaluated once, finite numbers only. Resource failures and nonfinite traps propagate.",
+      "opcode": 56
+    },
+    {
+      "name": "http_request",
+      "category": "host-effect",
+      "summary": "str strict_request_json -> result str str; CLI-only v2 origin/path/method/header grants. Completed HTTP status is data; no policy/MCP/tests/verify means capability_denied. Optional verified OpenSSL TLS helper.",
+      "opcode": 1007
+    },
+    {
+      "name": "pqc_seal",
+      "category": "host-effect",
+      "summary": "str strict_request_json -> result str str; CLI-only v3 public-key snapshot grant, standard CMS ML-KEM-768/AES256-GCM profile. Default/MCP/tests/verify denied. Optional native helper; no sender identity claim.",
+      "opcode": 1008
+    },
+    {
+      "name": "pqc_open",
+      "category": "host-effect",
+      "summary": "str strict_request_json -> result str str; CLI-only v3 private-key snapshot grant. Strict supported CMS profile and full authentication before returning Body JSON. No key bytes, paths or provider selection from source.",
+      "opcode": 1009
+    },
+    {
+      "name": "json_decode_fields",
+      "category": "pure-library",
+      "summary": "(json_decode_fields T text) -> result T str; strict typed JSON projection ignoring only unknown struct fields recursively. Required fields, maps, tagged wrappers, parsing and resource failures retain json_decode semantics; evaluates text once.",
+      "opcode": 57
     }
   ],
   "protocol_schemas": [

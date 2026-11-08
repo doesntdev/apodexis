@@ -552,10 +552,12 @@ static ApxValue *pure_builtin(int32_t op,ApxValue *a,ApxValue *b,ApxValue *c){
     apx_trap("invalid pure-library opcode");return NULL;
 }
 ApxValue *apx_builtin3(int32_t op,ApxValue *a,ApxValue *b,ApxValue *c){return pure_builtin(op,a,b,c);}
+static ApxValue *language_json_encode(ApxValue *v);
 static int host_fd=-1;
 static ApxValue *host_builtin(int32_t op,ApxValue *a,ApxValue *b);
 ApxValue *apx_builtin(int32_t op, ApxValue *a, ApxValue *b) {
-    if(op>=1001&&op<=1006)return host_builtin(op,a,b);
+    if(op>=1001&&op<=1009)return host_builtin(op,a,b);
+    if(op==56)return language_json_encode(a);
     if(op>=30&&op<=54)return pure_builtin(op,a,b,NULL);
     if (op >= 1 && op <= 5) {
         if (a && b && a->kind == VINT && b->kind == VINT) {
@@ -796,7 +798,7 @@ ApxValue *apx_validate(const char *schema,ApxValue *input){ApxValue *type=parse_
  * particular, validate all declared fields before searching extras, and retain
  * the old strcmp extra selection (including embedded-NUL ties). No schema
  * objects, parsing, caches or mutable descriptor state are needed here. */
-static ApxValue *validate_static_value(const ApxSchema *s,ApxValue *input,unsigned depth){
+static ApxValue *validate_static_value(const ApxSchema *s,ApxValue *input,unsigned depth,int fields){
     if(depth>VALUE_TYPE_DEPTH)fail("A103","abi_input","type_nesting_limit_exceeded","input type nesting exceeds 64");
     if(!s || s->kind>APX_SCHEMA_STRUCT)apx_trap("invalid static schema");
     if(s->kind==APX_SCHEMA_NULL)return input;
@@ -819,7 +821,7 @@ static ApxValue *validate_static_value(const ApxSchema *s,ApxValue *input,unsign
         if(input->kind!=VARRAY)fail("A103","abi_input","type_mismatch","expected array");
         if(!s->item)apx_trap("invalid static array schema");
         ApxValue *out=apx_array_new((int64_t)input->length);
-        for(size_t i=0;i<input->length;i++)out->items[i]=validate_static_value(s->item,array_item(input,i),depth+1);
+        for(size_t i=0;i<input->length;i++)out->items[i]=validate_static_value(s->item,array_item(input,i),depth+1,fields);
         return out;
     }
     case APX_SCHEMA_OPTION: case APX_SCHEMA_RESULT: {
@@ -834,7 +836,7 @@ static ApxValue *validate_static_value(const ApxSchema *s,ApxValue *input,unsign
         const ApxSchema *inner=option||first?s->item:s->error;
         if(input->length!=2||!payload)fail("A103","abi_input","type_mismatch","invalid tagged map value payload");
         if(!inner)apx_trap("invalid static tagged schema");
-        return apx_variant(option?"some":first?"ok":"err",validate_static_value(inner,payload,depth+1));
+        return apx_variant(option?"some":first?"ok":"err",validate_static_value(inner,payload,depth+1,fields));
     }
     case APX_SCHEMA_MAP: {
         if(input->kind!=VRECORD)fail("A103","abi_input","type_mismatch","expected map object");
@@ -842,7 +844,7 @@ static ApxValue *validate_static_value(const ApxSchema *s,ApxValue *input,unsign
         ApxValue *out=map_new(input->length);struct MapEntry *entries=allocate(input->length*sizeof *entries);
         for(size_t i=0;i<input->length;i++){entries[i].key=input->members.names[i];entries[i].length=key_length(input,i);entries[i].item=input->items[i];}
         qsort(entries,input->length,sizeof *entries,entry_compare);
-        for(size_t i=0;i<input->length;i++){out->members.names[i]=entries[i].key;out->key_lengths[i]=entries[i].length;out->items[i]=validate_static_value(s->item,entries[i].item,depth+1);}
+        for(size_t i=0;i<input->length;i++){out->members.names[i]=entries[i].key;out->key_lengths[i]=entries[i].length;out->items[i]=validate_static_value(s->item,entries[i].item,depth+1,fields);}
         return out;
     }
     case APX_SCHEMA_STRUCT: {
@@ -854,8 +856,9 @@ static ApxValue *validate_static_value(const ApxSchema *s,ApxValue *input,unsign
             if(!f->name||!f->type)apx_trap("invalid static struct field");
             ApxValue *v=find_field(input,f->name);
             if(!v){char msg[256];snprintf(msg,sizeof msg,"missing field `%s`",f->name);fail("A101","abi_input","missing_field",msg);}
-            out->members.names[i]=f->name;out->items[i]=validate_static_value(f->type,v,depth+1);
+            out->members.names[i]=f->name;out->items[i]=validate_static_value(f->type,v,depth+1,fields);
         }
+        if(fields)return out;
         const char *extra=NULL;
         for(size_t i=0;i<input->length;i++)if(!find_key(out,input->members.names[i],key_length(input,i))&&(!extra||strcmp(input->members.names[i],extra)<0))extra=input->members.names[i];
         if(extra){char msg[256];snprintf(msg,sizeof msg,"extra field `%s`",extra);fail("A102","abi_input","extra_field",msg);}
@@ -864,13 +867,13 @@ static ApxValue *validate_static_value(const ApxSchema *s,ApxValue *input,unsign
     default: apx_trap("invalid static schema");return NULL;
     }
 }
-ApxValue *apx_validate_static(const ApxSchema *schema,ApxValue *input){return validate_static_value(schema,input,0);}
-ApxValue *apx_json_decode(const ApxSchema *schema,ApxValue *text){
+ApxValue *apx_validate_static(const ApxSchema *schema,ApxValue *input){return validate_static_value(schema,input,0,0);}
+static ApxValue *json_decode_mode(const ApxSchema *schema,ApxValue *text,int fields){
     require_kind(text,VSTR);
     if(text->length>APX_INPUT)fail("R202","runtime","input_limit_exceeded","native input hard limit exceeded");
     jmp_buf local; jmp_buf *previous=trap_target; trap_target=&local;
     if(!setjmp(local)){
-        ApxValue *decoded=apx_validate_static(schema,parse_complete(text->text,text->length));
+        ApxValue *decoded=validate_static_value(schema,parse_complete(text->text,text->length),0,fields);
         trap_target=previous;
         return apx_variant("ok",decoded);
     }
@@ -883,6 +886,9 @@ ApxValue *apx_json_decode(const ApxSchema *schema,ApxValue *text){
         return apx_variant("err",apx_string(error_kind,(int64_t)strlen(error_kind)));
     longjmp(*previous,1);
 }
+
+ApxValue *apx_json_decode(const ApxSchema *schema,ApxValue *text){return json_decode_mode(schema,text,0);}
+ApxValue *apx_json_decode_fields(const ApxSchema *schema,ApxValue *text){return json_decode_mode(schema,text,1);}
 
 /* Deterministic compact output; quota measured before publication. */
 struct Output { char *text;size_t length,capacity; };
@@ -939,6 +945,17 @@ static void encode(struct Output *o,ApxValue *v,unsigned depth){
     case VBUILDER:fail("T101","type","type_mismatch","builder cannot cross output ABI");break;
     }
 }
+static void finite_json(ApxValue *v,unsigned depth){
+    if(depth>APX_DEPTH)fail("R205","runtime","recursion_limit_exceeded","JSON value nesting too deep");
+    if(!v)return;
+    if(v->kind==VFLOAT&&!isfinite(v->real))apx_trap("json_encode requires finite numbers");
+    if(v->kind==VARRAY){for(size_t i=0;i<v->length;i++){ApxValue scratch;finite_json(array_read(v,i,&scratch),depth+1);}}
+    else if(v->kind==VRECORD||v->kind==VMAP||v->kind==VVARIANT){for(size_t i=0;i<v->length;i++)finite_json(v->items[i],depth+1);}
+}
+static ApxValue *language_json_encode(ApxValue *v){
+    finite_json(v,0);struct Output out={0};encode(&out,v,0);
+    return apx_string(out.text,(int64_t)out.length);
+}
 ApxValue *apx_json_parse(const char *text,size_t length){
     if(length>APX_INPUT)return NULL;
     jmp_buf local; jmp_buf *previous=trap_target; ApxValue *volatile result=NULL;
@@ -981,11 +998,12 @@ int apx_json_unsigned(ApxValue *v,uint64_t *out){
     }return 0;
 }
 const char *apx_json_key(ApxValue *v,size_t i){return v&&v->kind==VRECORD&&i<v->length?v->members.names[i]:NULL;}
+size_t apx_json_key_length(ApxValue *v,size_t i){return v&&v->kind==VRECORD&&i<v->length?key_length(v,i):0;}
 void apx_json_reset(void){reset_memory();}
 
 static ApxValue *host_error(const char *message){return apx_variant("err",apx_string(message,(int64_t)strlen(message)));}
 static ApxValue *host_builtin(int32_t op,ApxValue *a,ApxValue *b){
-    static const char *const names[]={"fs_read","fs_write","env_get","clock_ms","random_hex","http_get"};
+    static const char *const names[]={"fs_read","fs_write","env_get","clock_ms","random_hex","http_get","http_request","pqc_seal","pqc_open"};
     if(host_fd<0)return host_error("capability_denied");
     ApxValue *args=apx_array_new(op==1004?0:op==1002?2:1);
     if(args->length)apx_array_put(args,0,a);

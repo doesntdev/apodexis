@@ -1,0 +1,49 @@
+M http
+V Body
+V Header
+V Request
+V Response
+V text
+V header
+V body_text
+V request
+T Body struct
+  encoding:str
+  data:str
+T Header struct
+  name:str
+  value:Body
+T Request struct
+  method:str
+  url:str
+  headers:[Header]
+  body:Body
+T Response struct
+  status:i64
+  headers:[Header]
+  trailers:[Header]
+  body:Body
+F text data:str->Body
+  R (Body encoding="utf8" data=data)
+F header name:str value:str->Header
+  R (Header name=name value=(text value))
+F body_text body:Body->result str str
+  ? (= (. body encoding) "utf8")
+    R (ok (. body data))
+  ? (= (. body encoding) "base64")
+    R (err "http_non_utf8")
+  R (err "invalid_http_body")
+F request req:Request->result Response str
+  C (http_request (json_encode req))
+    ok wire
+      C (json_decode Response wire)
+        ok response
+          R (ok response)
+        err problem
+          R (err "invalid_http_response")
+    err problem
+      R (err problem)
+X text_roundtrip
+  A (= (body_text (text "é\0")) (ok "é\0"))
+X binary_is_not_text
+  A (= (body_text (Body encoding="base64" data="/w==")) (err "http_non_utf8"))

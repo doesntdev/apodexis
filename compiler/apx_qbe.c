@@ -243,14 +243,14 @@ static char *expression(FunctionEmitter *f, ApxExpr *e) {
         apx_buf_printf(&args, "w 19, l %s, l 0", capacity); return call(f, "$apx_builtin", 'l', args.data);
     }
     if (e->opcode == 43) return call(f,"$apx_builtin",'l',"w 43, l 0, l 0");
-    if (e->opcode == 55) {
+    if (e->opcode == 55 || e->opcode == 57) {
         /* The first operand is syntax, never an executable expression. */
         ApxType *target=e->args->expr->marker; ApxBuffer schema;
         apx_buf_init(&schema,owner->ctx);
         schema_type(owner,&schema,target,0,e->args->expr->span,0);
         char *descriptor=schema_descriptor(owner,target);
         char *text=expression(f,e->args->next->expr);
-        return call2(f,"$apx_json_decode",'l',descriptor,text);
+        return call2(f,e->opcode==57?"$apx_json_decode_fields":"$apx_json_decode",'l',descriptor,text);
     }
     /* Evaluate positional function arguments and named constructor fields in
        textual order. Only constructors reorder the resulting registers. */

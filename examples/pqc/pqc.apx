@@ -1,0 +1,53 @@
+M pqc
+V Body
+V Envelope
+V text
+V body_text
+V seal
+V open
+T Body struct
+  encoding:str
+  data:str
+T Envelope struct
+  format:str
+  data:str
+T SealRequest struct
+  key:str
+  body:Body
+T OpenRequest struct
+  key:str
+  envelope:Envelope
+F text data:str->Body
+  R (Body encoding="utf8" data=data)
+F body_text body:Body->result str str
+  ? (= body.encoding "utf8")
+    R (ok body.data)
+  ? (= body.encoding "base64")
+    R (err "pqc_non_utf8")
+  R (err "invalid_pqc_body")
+F seal key:str body:Body->result Envelope str
+  C (pqc_seal (json_encode (SealRequest key=key body=body)))
+    ok wire
+      C (json_decode Envelope wire)
+        ok envelope
+          R (ok envelope)
+        err problem
+          R (err "invalid_pqc_response")
+    err problem
+      R (err problem)
+F open key:str envelope:Envelope->result Body str
+  C (pqc_open (json_encode (OpenRequest key=key envelope=envelope)))
+    ok wire
+      C (json_decode Body wire)
+        ok body
+          R (ok body)
+        err problem
+          R (err "invalid_pqc_response")
+    err problem
+      R (err problem)
+X text_roundtrip
+  A (= (body_text (text "é\0")) (ok "é\0"))
+X binary_is_not_text
+  A (= (body_text (Body encoding="base64" data="/w==")) (err "pqc_non_utf8"))
+X unknown_encoding
+  A (= (body_text (Body encoding="other" data="")) (err "invalid_pqc_body"))

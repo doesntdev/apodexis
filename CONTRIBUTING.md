@@ -31,8 +31,11 @@ make test
 
 The build uses vendored QBE 1.3 and downloads no packages. The compiler, native
 runtime, stdio MCP server and default tests require no Python, Rust, Cargo,
-Node.js, model or provider credentials. The optional HTTP GET broker adapter
-uses `/usr/bin/curl`; it is not a default test dependency.
+Node.js, model or provider credentials. Default tests exercise native libc HTTP,
+not curl. Optional verified TLS requires system OpenSSL and pkg-config only for
+`make http-tls test-http-tls`; no dependencies are downloaded. Run
+`make test-http-sanitize HTTP_SANITIZE_TLS=1` for real HTTP implementation
+instrumentation and `make dist-http` for the explicit TLS distribution profile.
 
 The compiler creates temporary native artifacts under `.build/`; keep the
 checkout writable and its directory layout intact. Installed compilation also

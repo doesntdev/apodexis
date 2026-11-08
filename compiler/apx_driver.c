@@ -7,6 +7,8 @@
 #include "apx_frontend.h"
 #include "apx_modules.h"
 #include "apx_host.h"
+#include "apx_http.h"
+#include "apx_serve.h"
 #include "../runtime/apx_runtime.h"
 #include <errno.h>
 #include <fcntl.h>
@@ -22,6 +24,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/resource.h>
+#include <sys/prctl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -45,6 +48,8 @@ static char root[PATH_LIMIT];
 static volatile sig_atomic_t active_process,timed_out,shutdown_requested;
 static ApxHostPolicy *host_policy;
 static int host_enabled;
+static int serving_invocation;
+static int64_t serving_deadline;
 static void die(const char *message){fprintf(stderr,"apodexis: %s\n",message);exit(70);}
 static void *memory(size_t n){void *p=calloc(1,n?n:1);if(!p)die("allocation failed");return p;}
 static char *duplicate(const char *s){size_t n=strlen(s)+1;char *p=memory(n);memcpy(p,s,n);return p;}
@@ -81,6 +86,7 @@ static char *generic_error(const char *kind,const char *message){struct Buffer b
 static int successful(const char *json){ApxValue *v=apx_json_parse(json,strlen(json));const char *status=apx_json_string(apx_json_get(v,"status"));return status&&!strcmp(status,"ok");}
 static void find_root(void){ssize_t n=readlink("/proc/self/exe",root,sizeof root-1);if(n<=0||n>=(ssize_t)sizeof root-1)die("cannot resolve compiler executable");root[n]=0;
     char *end=strrchr(root,'/');if(!end)die("invalid executable path");*end=0;end=strrchr(root,'/');if(!end)die("invalid distribution layout");*end=0;
+    char plain[PATH_LIMIT],tls[PATH_LIMIT];path(plain,root,".build/tools/apx-http");path(tls,root,".build/tools/apx-http-tls");apx_host_helpers(plain,tls);char crypto[PATH_LIMIT];path(crypto,root,".build/tools/apx-pqc");apx_host_pqc_helper(crypto);
 }
 
 /* Bounded event-driven child supervision, no shell/eval and no inherited secret
@@ -103,24 +109,28 @@ static struct Process execute_image(char *const argv[],const char *input,const c
     int broker[2]={-1,-1};int use_host=native&&host_policy&&host_enabled;if(use_host&&socketpair(AF_UNIX,SOCK_STREAM|SOCK_CLOEXEC,0,broker))die("host broker channel failed");
     if(shutdown_requested){close(fi);close(fo);close(fe);if(use_host){close(broker[0]);close(broker[1]);}unlink(in);unlink(out);unlink(err);result.error=duplicate("server is shutting down");return result;}
     sigset_t blocked,previous;sigemptyset(&blocked);sigaddset(&blocked,SIGTERM);sigaddset(&blocked,SIGINT);sigprocmask(SIG_BLOCK,&blocked,&previous);
-    fflush(NULL);pid_t pid=fork();if(pid<0)die("fork failed");
-    if(!pid){setpgid(0,0);signal(SIGALRM,SIG_DFL);signal(SIGTERM,SIG_DFL);signal(SIGINT,SIG_DFL);sigprocmask(SIG_SETMASK,&previous,NULL);dup2(fi,STDIN_FILENO);dup2(fo,STDOUT_FILENO);dup2(fe,STDERR_FILENO);close(fi);close(fo);close(fe);
-        /* fd 3 may already be the retained image. Never close it before exec,
-         * and keep CLOEXEC so the executed source cannot access that image. */
-        if(image_fd>=0){if(use_host)_exit(125);if(image_fd!=3&&dup3(image_fd,3,O_CLOEXEC)<0)_exit(125);if(fcntl(3,F_SETFD,FD_CLOEXEC)<0)_exit(125);}
-        if(use_host&&dup2(broker[1],3)<0)_exit(125);
-        if(syscall(SYS_close_range,(use_host||image_fd>=0)?4u:3u,~0u,0))_exit(125);
+    int64_t execution_deadline=serving_invocation?serving_deadline:apx_http_now()+30000;pid_t parent=getpid();fflush(NULL);pid_t pid=fork();if(pid<0)die("fork failed");
+    if(!pid){if(prctl(PR_SET_PDEATHSIG,SIGKILL)||getppid()!=parent)_exit(125);if(!serving_invocation)setpgid(0,0);signal(SIGALRM,SIG_DFL);signal(SIGTERM,SIG_DFL);signal(SIGINT,SIG_DFL);sigprocmask(SIG_SETMASK,&previous,NULL);dup2(fi,STDIN_FILENO);dup2(fo,STDOUT_FILENO);dup2(fe,STDERR_FILENO);close(fi);close(fo);close(fe);
+        /* Duplicate both sources before remapping: either may occupy fd 3/4.
+         * The image remains CLOEXEC, independently of the worker broker fd. */
+        int retained=image_fd>=0?fcntl(image_fd,F_DUPFD_CLOEXEC,5):-1;
+        int channel=use_host?fcntl(broker[1],F_DUPFD_CLOEXEC,5):-1;
+        if(image_fd>=0&&(retained<0||dup3(retained,4,O_CLOEXEC)<0))_exit(125);
+        if(use_host&&(channel<0||dup2(channel,3)<0))_exit(125);
+        if(!use_host&&image_fd>=0)close(3);
+        if(syscall(SYS_close_range,image_fd>=0?5u:use_host?4u:3u,~0u,0))_exit(125);
         limit_child(native);
         char *const env[]={"PATH=/usr/bin:/bin","LC_ALL=C",use_host?"APX_HOST_FD=3":NULL,NULL};
-        if(image_fd>=0)syscall(SYS_execveat,3,"",argv,env,AT_EMPTY_PATH);else execve(argv[0],argv,env);_exit(127);
+        if(image_fd>=0)syscall(SYS_execveat,4,"",argv,env,AT_EMPTY_PATH);else execve(argv[0],argv,env);_exit(127);
     }
-    close(fi);close(fo);close(fe);setpgid(pid,pid);active_process=pid;timed_out=0;alarm(30);if(shutdown_requested)kill(-pid,SIGKILL);sigprocmask(SIG_SETMASK,&previous,NULL);int status=0;
-    if(use_host){close(broker[1]);int pidfd=(int)syscall(SYS_pidfd_open,pid,0);if(pidfd<0)kill(-pid,SIGKILL);else{
+    close(fi);close(fo);close(fe);if(!serving_invocation)setpgid(pid,pid);pid_t group=serving_invocation?getpgrp():pid;active_process=group;timed_out=0;alarm(30);if(shutdown_requested)kill(-group,SIGKILL);sigprocmask(SIG_SETMASK,&previous,NULL);int status=0;
+    if(use_host){close(broker[1]);int pidfd=(int)syscall(SYS_pidfd_open,pid,0);if(pidfd<0)kill(-group,SIGKILL);else{
+        apx_host_execution(host_policy,execution_deadline,group,pidfd,&timed_out,&shutdown_requested);
         struct pollfd watched[2]={{pidfd,POLLIN,0},{broker[0],POLLIN,0}};
-        for(;;){int ready=poll(watched,2,-1);if(ready<0&&errno==EINTR)continue;if(ready<0||watched[0].revents)break;if(watched[1].revents&POLLIN){int served=apx_host_serve(host_policy,broker[0]);if(served<0){kill(-pid,SIGKILL);break;}if(served>0){watched[1].fd=-1;}}else if(watched[1].revents&(POLLHUP|POLLERR)){watched[1].fd=-1;}}
+        for(;;){if(timed_out||shutdown_requested||apx_http_now()>=execution_deadline){kill(-group,SIGKILL);break;}int ready=poll(watched,2,100);if(ready<0&&errno==EINTR)continue;if(ready<0||watched[0].revents)break;if(watched[1].revents&POLLIN){int served=apx_host_serve(host_policy,broker[0]);if(served<0){/* A serving broker shares the job group; do not kill itself on worker EOF/error. */if(serving_invocation)kill(pid,SIGKILL);else kill(-group,SIGKILL);break;}if(served>0){watched[1].fd=-1;}}else if(watched[1].revents&(POLLHUP|POLLERR)){watched[1].fd=-1;}}
         close(pidfd);
     }close(broker[0]);}
-    while(waitpid(pid,&status,0)<0){if(errno!=EINTR){kill(-pid,SIGKILL);waitpid(pid,&status,0);break;}}
+    while(waitpid(pid,&status,0)<0){if(errno!=EINTR){kill(-group,SIGKILL);waitpid(pid,&status,0);break;}}
     alarm(0);active_process=0;
     result.exit_code=timed_out?124:WIFEXITED(status)?WEXITSTATUS(status):128+WTERMSIG(status);
     result.out=read_path(out,PROCESS_LIMIT);result.error=read_path(err,1048576);
@@ -313,7 +323,7 @@ static char *resource_content(const char *uri){
     return NULL;
 }
 static void compiled_capabilities(struct Buffer *);
-static char *capabilities(void){struct Buffer b={0};envelope(&b,"apodexis.native_capabilities.v1",1);text(&b,",\"backend\":\"qbe\",\"target\":\"amd64_sysv\",\"compiler\":\"C\",\"runtime\":\"C\",\"requires_rust\":false,\"requires_python\":false,\"third_party_compiler_backends\":[\"QBE 1.3\"],\"operations\":[\"format\",\"check\",\"explain\",\"contract\",\"pseudocode\",\"apply_repairs\",\"run\",\"test\",\"verify\",\"emit-qbe\",\"build\",\"bundle\"],\"platform_tools\":[\"assembler\",\"linker\"],\"sandbox\":\"Linux seccomp\",\"mcp_tools\":[");for(size_t i=0;i<sizeof tool_names/sizeof tool_names[0];i++){if(i)text(&b,",");quote(&b,tool_names[i]);}text(&b,"]");compiled_capabilities(&b);text(&b,"}");return finish(&b);}
+static char *capabilities(void){struct Buffer b={0};envelope(&b,"apodexis.native_capabilities.v1",1);text(&b,",\"backend\":\"qbe\",\"target\":\"amd64_sysv\",\"compiler\":\"C\",\"runtime\":\"C\",\"requires_rust\":false,\"requires_python\":false,\"third_party_compiler_backends\":[\"QBE 1.3\"],\"operations\":[\"format\",\"check\",\"explain\",\"contract\",\"pseudocode\",\"apply_repairs\",\"run\",\"test\",\"verify\",\"emit-qbe\",\"build\",\"bundle\",\"pqc-keygen\"],\"platform_tools\":[\"assembler\",\"linker\"],\"sandbox\":\"Linux seccomp\",\"mcp_tools\":[");for(size_t i=0;i<sizeof tool_names/sizeof tool_names[0];i++){if(i)text(&b,",");quote(&b,tool_names[i]);}text(&b,"]");compiled_capabilities(&b);char plain[PATH_LIMIT],tls[PATH_LIMIT];path(plain,root,".build/tools/apx-http");path(tls,root,".build/tools/apx-http-tls");text(&b,",\"http_client\":{\"activation\":\"cli-run-capabilities\",\"http_helper_available\":");text(&b,access(plain,X_OK)?"false":"true");text(&b,",\"tls_helper_available\":");text(&b,access(tls,X_OK)?"false":"true");text(&b,"}");char crypto[PATH_LIMIT];path(crypto,root,".build/tools/apx-pqc");text(&b,",\"post_quantum\":{\"activation\":\"cli-run-capabilities\",\"policy_schema\":\"apodexis.host_policy.v3\",\"tls_group\":\"X25519MLKEM768\",\"tls_cipher\":\"TLS_AES_256_GCM_SHA384\",\"application_profile\":\"cms-authenveloped-mlkem768-aes256gcm-v1\",\"application_helper_available\":");text(&b,access(crypto,X_OK)?"false":"true");text(&b,",\"keygen\":\"operator-cli\"}}");return finish(&b);}
 static int strict_object(ApxValue *v,const char *const *keys,size_t count){if(apx_json_kind(v)!=6||apx_json_length(v)!=count)return 0;for(size_t i=0;i<count;i++)if(!apx_json_get(v,keys[i]))return 0;return 1;}
 static int limit_value(ApxValue *v,uint64_t *out){return apx_json_unsigned(v,out);}
 static int request_limits(ApxValue *v,struct Limits *out){const char *keys[]={"fuel","max_input_bytes","max_output_bytes"};if(!strict_object(v,keys,3)||!limit_value(apx_json_get(v,"fuel"),&out->fuel))return 0;
@@ -507,10 +517,34 @@ static int mcp(void){if(!store_settings())return 64;struct sigaction action={0};
         discard_pending();free(result);free(method_copy);free(id_json);if(!sent){code=2;break;}
     }free(line);clear_store();apx_json_reset();return shutdown_requested?128+shutdown_requested:code;
 }
-static void usage(void){fputs("Usage: apodexis {fmt|check|explain|contract|pseudocode|run|test|verify|emit-qbe|build|bundle} source.apx [--json] [--input file.json] [--fuel n] [--max-input-bytes n] [--max-output-bytes n] [--capabilities policy.json] [-o path]\n       apodexis capabilities\n       apodexis mcp\n",stderr);}
+/* Serving admission owns the manifest and DTO projection. Driver callbacks own
+ * only startup compilation/sealing and an isolated native broker invocation. */
+static int serve_compile(const char *file,ApxServeImage *image){
+    struct Artifact a={0};char *source=read_path(file,SOURCE_LIMIT),*diagnostic=NULL,*error=NULL;unsigned char *bytes=NULL;int ok=0;
+    if(!source)goto done;
+    if(strstr(source,"\nI ")||strstr(source,"\nV ")){char *assembled=NULL;if(apx_modules_load_file(file,&assembled,&diagnostic))goto done;free(source);source=assembled;}
+    if(compile_front(source,&a,1)||apx_describe_source(source,NULL,&image->contract,NULL,&diagnostic))goto done;
+    error=build_native(&a);if(error)goto done;
+    size_t length=0;bytes=binary_bytes(a.program,&length);if(!bytes)goto done;
+    ApxValue *contract=apx_json_parse(image->contract,strlen(image->contract));const char *hash=apx_json_string(apx_json_get(contract,"contract_hash"));
+    if(!hash||strlen(hash)>=sizeof image->contract_hash||!*a.hash)goto done;
+    image->fd=sealed_image(bytes,length);if(image->fd<0)goto done;
+    image->bytes=length;strcpy(image->source_hash,a.hash);strcpy(image->contract_hash,hash);ok=1;
+done:
+    free(source);free(diagnostic);free(error);free(bytes);artifact_free(&a);return ok;
+}
+static char *serve_invoke(const ApxServeImage *image,ApxHostPolicy *policy,const char *input,ApxServeLimits bounds,const char *directory,int64_t until){
+    struct Artifact a={0};if(strlen(directory)>=sizeof a.directory)return NULL;strcpy(a.directory,directory);
+    struct Limits limits={bounds.fuel,bounds.input,bounds.output,1,1};
+    serving_invocation=1;serving_deadline=until;host_policy=policy;timed_out=shutdown_requested=0;active_process=0;
+    return run_native_image(&a,input,limits,0,image->fd);
+}
+static void usage(void){fputs("Usage: apodexis {fmt|check|explain|contract|pseudocode|run|test|verify|emit-qbe|build|bundle} source.apx [--json] [--input file.json] [--fuel n] [--max-input-bytes n] [--max-output-bytes n] [--capabilities policy.json] [-o path]\n       apodexis pqc-keygen ABSOLUTE_NEW_DIRECTORY --json\n       apodexis capabilities\n       apodexis mcp\n       apodexis serve --manifest FILE\n",stderr);}
 static int unsigned_argument(const char *s,uint64_t *value){if(!s||!*s||*s=='-')return 0;errno=0;char *end;unsigned long long n=strtoull(s,&end,10);if(errno||*end)return 0;*value=(uint64_t)n;return 1;}
-int main(int argc,char **argv){find_root();struct sigaction action={0};action.sa_handler=deadline;sigemptyset(&action.sa_mask);sigaction(SIGALRM,&action,NULL);
+int main(int argc,char **argv){find_root();struct sigaction action={0};action.sa_handler=deadline;sigemptyset(&action.sa_mask);sigaction(SIGALRM,&action,NULL);action.sa_handler=shutdown_signal;sigaction(SIGTERM,&action,NULL);sigaction(SIGINT,&action,NULL);apx_host_cancel_signals(&timed_out,&shutdown_requested);
     const char *basename=strrchr(argv[0],'/');basename=basename?basename+1:argv[0];if(!strcmp(basename,"apx-mcp")||(argc>1&&!strcmp(argv[1],"mcp")))return mcp();
+    if(argc>1&&!strcmp(argv[1],"serve")){if(argc!=4||strcmp(argv[2],"--manifest")){usage();return 64;}ApxServeDriver driver={serve_compile,serve_invoke};char build[PATH_LIMIT];path(build,root,".build");return apx_serve(argv[3],build,&driver);}
+    if(argc>1&&!strcmp(argv[1],"pqc-keygen")){if(argc!=4||strcmp(argv[3],"--json")){usage();return 64;}char *out=apx_host_pqc_keygen(argv[2]);int ok=out&&successful(out);if(out){puts(out);free(out);}apx_json_reset();return ok?0:1;}
     if(argc>1&&!strcmp(argv[1],"capabilities")){char *out=capabilities();puts(out);free(out);return 0;}if(argc<3){usage();return 64;}
     const char *command=argv[1];const char *commands[]={"fmt","check","explain","contract","pseudocode","run","test","verify","emit-qbe","build","bundle"};int known=0;for(size_t i=0;i<sizeof commands/sizeof commands[0];i++)if(!strcmp(command,commands[i]))known=1;if(!known){usage();return 64;}
     struct Limits limits=defaults();const char *input_name=NULL,*output=NULL;int json_mode=0;

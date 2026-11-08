@@ -1,0 +1,18 @@
+{
+  "schema": "apodexis.tool_server.v1",
+  "max_concurrent_calls": 1,
+  "tools": [
+    {
+      "name": "repo_brief",
+      "description": "Read-only bounded public repository briefing; completeness and errors are explicit.",
+      "source": "../http_client/repo_brief.apx",
+      "capabilities": "github-policy.json",
+      "limits": {
+        "fuel": 1000000,
+        "max_input_bytes": 1024,
+        "max_output_bytes": 131072,
+        "timeout_ms": 30000
+      }
+    }
+  ]
+}
